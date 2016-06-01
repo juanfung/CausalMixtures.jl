@@ -1,0 +1,212 @@
+## treatment effect posterior predictives
+
+## --------------------------------------------------------------------------- #
+## TODO: dpm_ppd computes posterior predictive density values
+function dpm_ppd(out::GibbsOut, znew::Vector{Float64}, prior_theta::PriorTheta;
+                 ##hnew::SparseMatrixCSC{Float64,Int64}
+                 xid::UnitRange=1:(length(znew)-1))
+    
+    rho = prior_theta.prior_Sigma.rho
+    rhoR = prior_theta.prior_Sigma.rho*prior_theta.prior_Sigma.R
+    mu = prior_theta.prior_beta.mu
+    if prior_theta.prior_beta.Vinv
+        ## convert precision to covariance
+        V = prior_theta.prior_beta.V\eye(prior_theta.prior_beta.V)
+    end
+    
+    ## predictors
+    hnew = blkdiag(sparse(znew'), sparse(znew[xid]'), sparse(znew[xid]')) # 3 x ktot
+    
+    ## pre-allocate storage
+    ynew_out = Array(Float64, 0) #Array(Float64, 3M)
+    ynew = Array(Float64, 0)
+    w = Array(Float64, 0)
+    
+    for m in 1:length(out.out_dp)
+        
+        alpha = out.out_dp[m].alpha
+        J = out.out_dp[m].J
+        ##labels = out.out_dp[m].labels
+        njs = out.out_dp[m].njs
+        theta = out.out_theta[m]
+        
+        for j in 1:J
+            hb = hnew*theta[j].beta
+            append!( ynew, hb + chol(theta[j].Sigma)'*randn(3) )
+            push!( w, njs[j]*exp(logpdf(MvNormal(hb, theta[j].Sigma), ynew[(3*(j-1)+1):3*j])) )
+        end
+        
+        ## draw from prior
+        Sigma = NobileWishart(rho, rhoR)
+        beta = mu + chol(V)'*randn(length(mu))
+        hb = hnew*beta
+        append!( ynew, hb + chol(Sigma)'*randn(3) )
+        push!( w, alpha*exp(logpdf(MvNormal(hb, Sigma), ynew[(3*J+1):3*(J+1)])) )
+        
+        jm = findmax(w)[2]
+        append!( ynew_out, ynew[(3*(jm-1)+1):3*jm] )
+        
+        ##ynew = reshape(ynew, 3, J+1)
+        ##append!( ynew_out, ynew[:, findmax(w)[2] ] )
+        ##ynew_out[:,m] = ynew[ findmax(w)[2] ]
+        
+        ## reset storage
+        resize!(ynew, 0)
+        resize!(w, 0)
+        
+    end
+    
+    return reshape(ynew_out, 3, length(out.out_dp))
+    
+end
+
+## --------------------------------------------------------------------------- #
+## sample latent data from posterior
+function rand_dpm(out::GibbsOut, p::PriorTheta, hnew::SparseMatrixCSC{Float64,Int64})
+    ## setup...
+    rho = p.prior_Sigma.rho
+    rhoR = rho*p.prior_Sigma.R
+    mu = p.prior_beta.mu
+    if p.prior_beta.Vinv
+        ## convert precision to covariance
+        V = p.prior_beta.V\eye(p.prior_beta.V)
+    end
+    ## pre-allocate storage
+    ynew_out = Array(Float64, 0) #Array(Float64, 3M)
+    ynew = Array(Float64, 0)
+    w = Array(Float64, 0)    
+    for m in 1:length(out.out_dp)        
+        alpha = out.out_dp[m].alpha
+        J = out.out_dp[m].J
+        njs = out.out_dp[m].njs
+        theta = out.out_theta[m]        
+        for j in 1:J
+            hb = hnew*theta[j].beta
+            append!( ynew, hb + chol(theta[j].Sigma)'*randn(3) )
+            push!( w, njs[j]*exp(logpdf(MvNormal(hb, theta[j].Sigma), ynew[(3*(j-1)+1):3*j])) )
+        end        
+        ## draw from prior
+        Sigma = NobileWishart(rho, rhoR)
+        beta = mu + chol(V)'*randn(length(mu))
+        hb = hnew*beta
+        append!( ynew, hb + chol(Sigma)'*randn(3) )
+        push!( w, alpha*exp(logpdf(MvNormal(hb, Sigma), ynew[(3*J+1):3*(J+1)])) )
+        ## select component
+        jm = findmax(w)[2]
+        append!( ynew_out, ynew[(3*(jm-1)+1):3*jm] )
+        ## reset storage
+        resize!(ynew, 0)
+        resize!(w, 0)        
+    end    
+    return reshape(ynew_out, 3, length(out.out_dp))
+end
+
+function rand_blocked(out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64}) # also works for fmn
+    ## setup...
+    ## pre-allocate storage
+    ynew_out = Array(Float64, 0) #Array(Float64, 3M)
+    ynew = Array(Float64, 0)
+    w = Array(Float64, 0)
+    for m in 1:length(out.out_dp)
+        theta = out.out_theta[m]
+        ws = out.out_dp[m].ws
+        for j in keys(ws)
+            wj = ws[j].w
+            hb = hnew * theta[j].beta
+            append!( ynew, hb + chol(theta[j].Sigma)'*randn(3) )
+            push!( w, wj*exp(logpdf(MvNormal(hb, theta[j].Sigma), ynew[(3*(j-1)+1):3*j])) )
+        end
+        jm = findmax(w)[2]
+        append!( ynew_out, ynew[(3*(jm-1)+1):3*jm] )
+        ## reset storage
+        resize!(ynew, 0)
+        resize!(w, 0)
+    end
+    return reshape(ynew_out, 3, length(out.out_dp))            
+end
+
+function rand_fmn(out::GibbsOut, input::GibbsInput, hnew::SparseMatrixCSC{Float64,Int64}) # also works for fmn
+    ## setup...
+    J = input.priors.prior_dp.J
+    aJ = input.priors.prior_dp.alpha/float(J)
+    ## pre-allocate storage
+    ynew_out = Array(Float64, 0) #Array(Float64, 3M)
+    ynew = Array(Float64, 0)
+    w = Array(Float64, 0)
+    for m in 1:length(out.out_dp)
+        theta = out.out_theta[m]
+        njs = out.out_dp[m].njs
+        for j in 1:J
+            hb = hnew * theta[j].beta
+            append!( ynew, hb + chol(theta[j].Sigma)'*randn(3) )
+            push!( w, (njs[j] + aJ)*exp(logpdf(MvNormal(hb, theta[j].Sigma), ynew[(3*(j-1)+1):3*j])) )
+        end
+        jm = findmax(w)[2]
+        append!( ynew_out, ynew[(3*(jm-1)+1):3*jm] )
+        ## reset storage
+        resize!(ynew, 0)
+        resize!(w, 0)
+    end
+    return reshape(ynew_out, 3, length(out.out_dp))            
+end
+
+function rand_gaussian(out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64})
+    ## setup...
+    ## pre-allocate storage
+    ynew_out = Array(Float64, 0) #Array(Float64, 3M)
+    ynew = Array(Float64, 0)
+    #w = Array(Float64, 0)
+    for m in 1:length(out.out_dp)
+        hb = hnew * out.out_theta[m][1].beta
+        append!( ynew_out, hb + chol(out.out_theta[m][1].Sigma)'*randn(3) )
+        #push!( w, exp(logpdf(MvNormal(hb, out.out_theta[m][1].Sigma), ynew[(3*(j-1)+1):3*j])) )
+        ## reset storage
+        resize!(ynew, 0)
+        #resize!(w, 0)
+    end
+    return reshape(ynew_out, 3, length(out.out_dp))
+end
+
+function rand_ppd(out::GibbsOut, input::GibbsInput, znew::Vector{Float64})
+    hnew = blkdiag(sparse(znew'), sparse(znew[1:input.dims.kx]'), sparse(znew[1:input.dims.kx]'))
+    if input.params.model == "dpm"
+        ppd = rand_dpm(out, input.priors.prior_theta, hnew)
+    elseif input.params.model == "blocked"
+        ppd = rand_blocked(out, hnew)
+    elseif input.params.model == "fmn"
+        ppd = rand_fmn(out, input, hnew)
+    elseif input.params.model == "gaussian"
+        ppd = rand_gaussian(out, hnew)
+    ##elseif in(input.params.model, ["blocked", "fmn"])        
+    else
+        error("No method for model $(input.params.model)!")
+    end
+    return ppd
+end
+
+## given draws from posterior predictive, compute treatment effects
+function dpm_ate(ynew::Matrix{Float64}, input::GibbsInput)
+    sy = input.data.y.s[1]
+    dNew = vec(ynew[1,:])
+    ateNew = vec(ynew[2,:] - ynew[3,:])*sy
+    idx = find(d -> d > 0.0, dNew)
+    ttNew = ateNew[idx]
+    return TreatmentEffects(ate=ateNew, tt=ttNew)
+end
+
+## --------------------------------------------------------------------------- #
+## compute density values
+function dpm_density(ynew::Matrix{Float64}, input::GibbsInput)
+
+    sy = input.data.y.s[1]
+    ## ynew -> ate -> ate.dens
+    dNew = vec(ynew[1,:])
+    ateNew = vec(ynew[2,:] - ynew[3,:])*sy
+    ## ynew -> tt -> tt.dens
+    idx = find(d -> d > 0.0, dNew)
+    ttNew = ateNew[idx]
+    ## PPD(grid, ate.dens, tt.dens)
+    
+    return PPD(grid=linspace(1,1,1), ate=ateNew, tt=ttNew)
+
+end
