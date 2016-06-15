@@ -1,18 +1,15 @@
 ## functions to update GibbsState
-## TODO: remove @debug
 
 ## --------------------------------------------------------------------------- #
 ## main sampler functions
 
 ## update component labels and number of components
-@debug function update_labels!(state::GibbsState, input::GibbsInput)
+function update_labels!(state::GibbsState, input::GibbsInput)
     ## update component labels for each i
     @inbounds for i in 1:input.dims.n
-        ji = state.state_dp.labels[i] # i's current component
-        @bp ji == 0        
+        ji = state.state_dp.labels[i] # i's current component        
         state.state_dp.labels[i] = 0 # remove i from component ji
         state.state_dp.njs[ji] = state.state_dp.njs[ji] - 1 # decrease ji count
-        @bp state.state_dp.njs[ji] < 0
         ## remove empty component!
         if state.state_dp.njs[ji] == 0
             state = remove_component!(state, ji)
@@ -168,8 +165,8 @@ function update_params!(state::GibbsState, input::GibbsInput)
     
 end
 
-@debug function update_theta!(state::GibbsState, input::GibbsInput, j::Int64, idx::Vector{Int64},
-                              Hj::SparseMatrixCSC{Float64,Int64}) ##T<:AbstractArray{Int64,1} UnitRange{Int64}
+function update_theta!(state::GibbsState, input::GibbsInput, j::Int64, idx::Vector{Int64},
+                       Hj::SparseMatrixCSC{Float64,Int64}) ##T<:AbstractArray{Int64,1} UnitRange{Int64}
 
     nj = state.state_dp.njs[j]
     
@@ -186,7 +183,7 @@ end
         ##nj = div(length(yij),3)
         ##Hb = Hj*state_theta.beta # 3nj x 1
         Uj = yij - Hj*theta.beta # 3nj x 1
-        @bp length(Uj) != 3nj
+        if length(Uj) != 3nj error("Dimension mismatch! Oops") end
         Uj = reshape(Uj, nj, 3) # nj x 3
         Uj = Uj'*Uj + prior_theta.prior_Sigma.rho*prior_theta.prior_Sigma.R # 3 x 3        
         Sigma_j = NobileWishart( (nj + prior_theta.prior_Sigma.rho), Uj )        
@@ -347,13 +344,13 @@ end
 ## specialized functions for FMN
 
 ## update labels for fmn
-@debug function update_fmn_labels!(state::GibbsState, input::GibbsInput)
+function update_fmn_labels!(state::GibbsState, input::GibbsInput)
     ## update component labels for each i
     @inbounds for i in 1:input.dims.n
         ji = state.state_dp.labels[i] # i's current component
-        @bp ji == 0
+        if ji == 0 error("Null label! Oops") end
         state.state_dp.njs[ji] = state.state_dp.njs[ji] - 1 # decrease ji count
-        @bp state.state_dp.njs[ji] < 0
+        if state.state_dp.njs[ji] < 0 error("Negative label count! Oops") end
         ## sample component label
         state = sample_fmn_label!(state, input, i)
     end
