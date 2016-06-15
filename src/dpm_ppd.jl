@@ -43,7 +43,8 @@ function dpm_ppd(out::GibbsOut, znew::Vector{Float64}, prior_theta::PriorTheta;
         append!( ynew, hb + chol(Sigma)'*randn(3) )
         push!( w, alpha*exp(logpdf(MvNormal(hb, Sigma), ynew[(3*J+1):3*(J+1)])) )
         
-        jm = findmax(w)[2]
+        ##jm = findmax(w)[2]
+        jm = rand( Distributions.Categorical(w/sum(w)) )
         append!( ynew_out, ynew[(3*(jm-1)+1):3*jm] )
         
         ##ynew = reshape(ynew, 3, J+1)
@@ -92,7 +93,8 @@ function rand_dpm(out::GibbsOut, p::PriorTheta, hnew::SparseMatrixCSC{Float64,In
         append!( ynew, hb + chol(Sigma)'*randn(3) )
         push!( w, alpha*exp(logpdf(MvNormal(hb, Sigma), ynew[(3*J+1):3*(J+1)])) )
         ## select component
-        jm = findmax(w)[2]
+        ##jm = findmax(w)[2]
+        jm = rand( Distributions.Categorical(w/sum(w)) )
         append!( ynew_out, ynew[(3*(jm-1)+1):3*jm] )
         ## reset storage
         resize!(ynew, 0)
@@ -116,7 +118,8 @@ function rand_blocked(out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64}) # als
             append!( ynew, hb + chol(theta[j].Sigma)'*randn(3) )
             push!( w, wj*exp(logpdf(MvNormal(hb, theta[j].Sigma), ynew[(3*(j-1)+1):3*j])) )
         end
-        jm = findmax(w)[2]
+        ##jm = findmax(w)[2]
+        jm = rand( Distributions.Categorical(w/sum(w)) )
         append!( ynew_out, ynew[(3*(jm-1)+1):3*jm] )
         ## reset storage
         resize!(ynew, 0)
@@ -141,7 +144,8 @@ function rand_fmn(out::GibbsOut, input::GibbsInput, hnew::SparseMatrixCSC{Float6
             append!( ynew, hb + chol(theta[j].Sigma)'*randn(3) )
             push!( w, (njs[j] + aJ)*exp(logpdf(MvNormal(hb, theta[j].Sigma), ynew[(3*(j-1)+1):3*j])) )
         end
-        jm = findmax(w)[2]
+        ##jm = findmax(w)[2]
+        jm = rand( Distributions.Categorical(w/sum(w)) )
         append!( ynew_out, ynew[(3*(jm-1)+1):3*jm] )
         ## reset storage
         resize!(ynew, 0)
@@ -190,6 +194,7 @@ function dpm_ate(ynew::Matrix{Float64}, input::GibbsInput)
     dNew = vec(ynew[1,:])
     ateNew = vec(ynew[2,:] - ynew[3,:])*sy
     idx = find(d -> d > 0.0, dNew)
+
     ttNew = ateNew[idx]
     return TreatmentEffects(ate=ateNew, tt=ttNew)
 end

@@ -366,7 +366,7 @@ function sample_fmn_label!(state::GibbsState, input::GibbsInput, i::Int64)
     yi = [state.state_data.dstar[i], state.state_data.y1[i], state.state_data.y0[i]] # 3 x 1
     w = Array(Float64, state.state_dp.J)
     @inbounds for j in 1:state.state_dp.J        
-        w[j] = ( state.state_dp.njs[j] + state.state_dp.alpha/float(state.state_dp.J) ) *
+        w[j] = ( state.state_dp.njs[j] + state.state_dp.alpha ) *
         exp( prob_theta(state.state_theta[j], Hi, yi) ) / state.state_sampler.zdenom
     end    
     scale!(w, 1/sum(w))    
@@ -437,6 +437,7 @@ function update_blocked_labels!(state::GibbsState, input::GibbsInput)
     for i in 1:input.dims.n
         state = sample_blocked_label!(state, input, i)
     end
+
     state.state_dp = compute_weights!(state.state_dp)
     state.state_dp = update_J!(state.state_dp)
     return state
@@ -450,7 +451,7 @@ function sample_blocked_label!(state::GibbsState, input::GibbsInput, i::Int64)
     state.state_dp.njs[state.state_dp.labels[i]] -= 1
     ## 1. compute Pr(label i = j)
     @inbounds for j in 1:length(state.state_dp.njs)
-        w[j] = state.state_dp.ws[j].w * exp( prob_theta(state.state_theta[j], Hi, yi) ) / state.state_sampler.zdenom
+        w[j] = state.state_dp.ws[j].w * exp( prob_theta(state.state_theta[j], Hi, yi) ) #/ state.state_sampler.zdenom
     end
     scale!(w, 1/sum(w))
     ## 2. sample ji
