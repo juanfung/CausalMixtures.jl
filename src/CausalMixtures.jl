@@ -1,11 +1,12 @@
 ## Module for causal inference via mixture models
 
-__precompile__()
+##__precompile__()
 
 module CausalMixtures
 
 ## load packages
-using DataFrames, DataStructures, Distributions, Debug, JLD, HDF5
+using DataFrames, DataStructures, StatsModels, Distributions, JLD, HDF5
+##using Debug
 ##using DataStructures # for SortedDict
 
 import Base.+, Base.-, Base.*
@@ -72,7 +73,7 @@ type InputParams
     M::Int64
     scale_data::Tuple{Bool,Bool}
     verbose::Bool
-    model::ASCIIString
+    model::String
 end
 
 InputParams(; M=100, scale_data=(false,false), verbose=true, model="dpm") = InputParams(M, scale_data, verbose, model)
@@ -321,6 +322,8 @@ export dpm_init, dpm_chain!, dpm_gibbs!, dpm_dump!, dpm!, dpm_blocked! # DPM
 export dpm_fmn!, dpm_gaussian! # finite models
 export rescale_beta, rescale_output, acf_var, batch_var, ppd_cdf # processing output
 export dpm_ppd, rand_ppd, rand_dpm, rand_blocked, rand_gaussian, dpm_ate # posterior predictive treatment effects
+# functions for parallel ppd
+export select_ppd, single_dpm_ppd, single_blocked_ppd, single_fmn_ppd, single_gaussian_ppd, setup_ppd, parallel_ppd, parallel_rand_ppd
 
 ## --------------------------------------------------------------------------- #
 ## load main functions
@@ -342,5 +345,8 @@ include("dpm_gaussian.jl")
 
 ## posterior predictives
 include("dpm_ppd.jl")
+
+## parallelized ppd
+include("parallel_ppd.jl")
 
 end
