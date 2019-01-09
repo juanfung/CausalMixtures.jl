@@ -156,7 +156,7 @@ BlockedWeights(; w=1.0, v=1.0) = BlockedWeights(w, v)
 *(a::Real, b::BlockedWeights) = BlockedWeights(a*b.w, a*b.v)
 *(b1::BlockedWeights, b2::BlockedWeights) = BlockedWeights(b1.w*b2.w, b1.v*b2.v)
 
-function sumbw{T<:AbstractDict}(b::Base.ValueIterator{T}; i::Int64=1)
+function sumbw(b::Base.ValueIterator{T}; i::Int64=1) where T<:AbstractDict
     s = reduce(+, b)
     if i == 1 return s.w else return s.v end
 end
