@@ -201,7 +201,7 @@ Theta(; beta=zeros(2), Sigma=eye(2)) = Theta(beta,Sigma)
 ##end
 
 ##StateTheta(; state_theta=Dict{Int64,Theta}() ) = StateTheta(state_theta)
-typealias StateTheta Dict{Int64,Theta}
+StateTheta = Dict{Int64,Theta}
 
 mutable struct NjTheta
     nj::Int64
@@ -210,7 +210,7 @@ end
 
 NjTheta(; nj=0, theta=Theta()) = NjTheta(nj, theta)
 
-typealias StateNjTheta Dict{Int64,NjTheta}
+StateNjTheta = Dict{Int64,NjTheta}
 
 ## collect latent data
 mutable struct StateData
@@ -265,7 +265,7 @@ GibbsOut(M::Int64) = GibbsOut(Array(StateData, M), Array(StateDP, M), Array(Stat
 
 ## TODO: output as subtype of AbstractArray
 ## TODO: DO NOT SAVE state_sampler ...
-##typealias GibbsOut Array{GibbsState, 1}
+##GibbsOut = Array{GibbsState, 1}
 
 ## ---------------------------------------------------------------------------#
 ## collect {State, Input, Out} into tuple
@@ -278,7 +278,7 @@ GibbsOut(M::Int64) = GibbsOut(Array(StateData, M), Array(StateDP, M), Array(Stat
 
 ##GibbsTuple(; state=GibbsState(), input=GibbsInput(), out=GibbsOut()) = GibbsTuple(state, input, out)
 
-typealias GibbsTuple Tuple{GibbsState, GibbsInput, GibbsOut}
+GibbsTuple = Tuple{GibbsState, GibbsInput, GibbsOut}
 ##GibbsTuple(; state=GibbsState(), input=GibbsInput(), out=GibbsOut()) = GibbsTuple(state, input, out)
 
 ## --------------------------------------------------------------------------- #
@@ -289,7 +289,7 @@ mutable struct TreatmentEffects
     tt::Vector{Float64}
 end
 
-##typealias TE TreatmentEffects
+##TE = TreatmentEffects
 
 TreatmentEffects(; ate=Array(Float64,0), tt=Array(Float64,0) ) = TreatmentEffects(ate, tt)
 
@@ -300,7 +300,7 @@ mutable struct PosteriorPredictive
     late::Array{Float64}
 end
 
-typealias PPD PosteriorPredictive
+PPD = PosteriorPredictive
 
 PPD(;grid=linspace(-2,2,2), ate=zeros(2), tt=zeros(2), late=zeros(2)) = PPD(grid, ate, tt, late)
 
