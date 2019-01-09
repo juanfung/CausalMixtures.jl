@@ -300,9 +300,10 @@ mutable struct PosteriorPredictive
     late::Array{Float64}
 end
 
+PosteriorPredictive(;grid=linspace(-2,2,2), ate=zeros(2), tt=zeros(2), late=zeros(2)) = PPD(grid, ate, tt, late)
+
 PPD = PosteriorPredictive
 
-PPD(;grid=linspace(-2,2,2), ate=zeros(2), tt=zeros(2), late=zeros(2)) = PPD(grid, ate, tt, late)
 
 ## --------------------------------------------------------------------------- #
 ## export to Main
