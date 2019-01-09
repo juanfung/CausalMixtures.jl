@@ -6,7 +6,7 @@ module CausalMixtures
 
 ## load packages
 using DataFrames, DataStructures, Distributions, SparseArrays, StatsModels
-using JLD, HDF5
+using JLD, HDF5, Printf
 ## using Rebugger
 
 import Base.+, Base.-, Base.*
@@ -156,7 +156,7 @@ BlockedWeights(; w=1.0, v=1.0) = BlockedWeights(w, v)
 *(a::Real, b::BlockedWeights) = BlockedWeights(a*b.w, a*b.v)
 *(b1::BlockedWeights, b2::BlockedWeights) = BlockedWeights(b1.w*b2.w, b1.v*b2.v)
 
-function sumbw{T<:Associative}(b::Base.ValueIterator{T}; i::Int64=1)
+function sumbw{T<:AbstractDict}(b::Base.ValueIterator{T}; i::Int64=1)
     s = reduce(+, b)
     if i == 1 return s.w else return s.v end
 end
@@ -294,7 +294,7 @@ end
 TreatmentEffects(; ate=Array(Float64,0), tt=Array(Float64,0) ) = TreatmentEffects(ate, tt)
 
 mutable struct PosteriorPredictive
-    grid::LinSpace{Float64}
+    grid::LinRange{Float64}
     ate::Array{Float64}
     tt::Array{Float64}
     late::Array{Float64}
