@@ -5,9 +5,9 @@
 module CausalMixtures
 
 ## load packages
-using DataFrames, DataStructures, StatsModels, Distributions, JLD, HDF5
-##using Debug
-##using DataStructures # for SortedDict
+using DataFrames, DataStructures, Distributions, SparseArrays, StatsModels
+using JLD, HDF5
+## using Rebugger
 
 import Base.+, Base.-, Base.*
 
@@ -29,14 +29,14 @@ import Base.+, Base.-, Base.*
 ## Data
 
 ## raw data input
-immutable RawData
+struct RawData
     y_form::Formula
     d_form::Formula
     df::DataFrame
 end
 
 ## standardized data
-immutable ScaleData
+struct ScaleData
     a::Array{Float64}
     m::Array{Float64,1}
     s::Array{Float64,1}
@@ -45,7 +45,7 @@ end
 ScaleData(; a=[0.0], m=[0.0], s=[1.0]) = ScaleData(a, m, s)
 
 ## dimensions
-immutable InputDims
+struct InputDims
     n::Int64
     kx::Int64
     kz::Int64
@@ -55,7 +55,7 @@ end
 InputDims(; n=1, kx=1, kz=1, ktot=1) = InputDims(n, kx, kz, ktot)
 
 ## transformed data for sampler
-immutable InputData
+struct InputData
     y::Union{Vector{Float64},ScaleData}
     d::Vector{Int64}
     lower::Vector{Float64}
@@ -69,7 +69,7 @@ InputData(; y=[0.0], d=[0], lower=[0.0], upper=[0.0], Hmat=sparse([0.0])) = Inpu
 ## --------------------------------------------------------------------------- #
 ## Parameters
 
-type InputParams
+mutable struct InputParams
     M::Int64
     scale_data::Tuple{Bool,Bool}
     verbose::Bool
@@ -83,7 +83,7 @@ InputParams(M::Int64, scale_data::Tuple{Bool,Bool}, verbose::Bool) = InputParams
 ## --------------------------------------------------------------------------- #
 ## Priors
 
-immutable PriorDP
+struct PriorDP
     J::Int64
     alpha::Float64
     alpha_shape::Float64
@@ -92,7 +92,7 @@ end
 
 PriorDP(; J=2, alpha=1.0, alpha_shape=0.0, alpha_rate=0.0 ) = PriorDP(J, alpha, alpha_shape, alpha_rate)
 
-immutable PriorBeta
+struct PriorBeta
     mu::Vector{Float64} # prior mean
     V::Matrix{Float64} # prior precision
     Vinv::Bool # if true, precision; else, covariance
@@ -100,14 +100,14 @@ end
 
 PriorBeta(; mu=ones(2), V=eye(2), Vinv=true) = PriorBeta(mu, V, Vinv)
 
-immutable PriorSigma
+struct PriorSigma
     rho::Int64
     R::Matrix{Float64}
 end
 
 PriorSigma(; rho=1, R=eye(3) ) = PriorSigma(rho, R)
 
-immutable PriorTheta
+struct PriorTheta
     prior_beta::PriorBeta
     prior_Sigma::PriorSigma
 end
@@ -115,7 +115,7 @@ end
 PriorTheta(; prior_beta=PriorBeta(), prior_Sigma=PriorSigma()) = PriorTheta(prior_beta, prior_Sigma)
 
 ## collect priors
-immutable InputPriors
+struct InputPriors
     prior_dp::PriorDP
     prior_theta::PriorTheta
 end
@@ -125,7 +125,7 @@ InputPriors(; prior_dp = PriorDP(), prior_theta=PriorTheta()) = InputPriors(prio
 ## --------------------------------------------------------------------------- #
 ## collect all inputs
 
-immutable GibbsInput
+struct GibbsInput
     data::InputData # transformed data
     dims::InputDims # data dimensions
     params::InputParams # sampler parameters
@@ -138,7 +138,7 @@ GibbsInput(; data=InputData(), dims=InputDims(), params=InputParams(), priors=In
 ## --------------------------------------------------------------------------- #
 ## State
 
-type BlockedWeights
+mutable struct BlockedWeights
     w::Float64
     v::Float64
     ##nj::Int64
@@ -162,7 +162,7 @@ function sumbw{T<:Associative}(b::Base.ValueIterator{T}; i::Int64=1)
 end
 
 ## collect DP state
-type StateDP
+mutable struct StateDP
     J::Int64 # number of active components
     labels::Dict{Int64,Int64} # individual component membership
     njs::Dict{Int64,Int64} # component membership counts
@@ -188,7 +188,7 @@ StateDP(; J=2,
 Base.copy(m::StateDP) = StateDP([ copy(getfield(m, k)) for k = 1:length(fieldnames(m)) ]...)
 
 ## collect theta state, where theta = beta-Sigma pair
-type Theta
+mutable struct Theta
     beta::Vector{Float64} # latent data mean vector
     Sigma::Matrix{Float64} # latent data covariance matrix
 end
@@ -203,7 +203,7 @@ Theta(; beta=zeros(2), Sigma=eye(2)) = Theta(beta,Sigma)
 ##StateTheta(; state_theta=Dict{Int64,Theta}() ) = StateTheta(state_theta)
 typealias StateTheta Dict{Int64,Theta}
 
-type NjTheta
+mutable struct NjTheta
     nj::Int64
     theta::Theta    
 end
@@ -213,7 +213,7 @@ NjTheta(; nj=0, theta=Theta()) = NjTheta(nj, theta)
 typealias StateNjTheta Dict{Int64,NjTheta}
 
 ## collect latent data
-type StateData
+mutable struct StateData
     dstar::Vector{Float64} # latent selection outcome
     y1::Vector{Float64} # latent treatment outcome
     y0::Vector{Float64} # latent control outcome
@@ -223,7 +223,7 @@ StateData(; dstar=[0.0], y1=[0.0], y0=[0.0]) = StateData(dstar, y1, y0)
 Base.copy(m::StateData) = StateData([ copy(getfield(m, k)) for k = 1:length(fieldnames(m)) ]...)
 
 ## collect sampler state
-type StateSampler
+mutable struct StateSampler
     chain::Bool # is current chain continuing from previous chain?
     batch_n::Int64 # current batch number
     batch_m::Int64 # current batch iteration
@@ -237,7 +237,7 @@ StateSampler(; chain=false, batch_n=1, batch_m=0, batch_1=1, Vmu=[0.0], zdenom=0
     StateSampler(chain, batch_n, batch_m, batch_1, Vmu, zdenom)
 
 ## current state
-type GibbsState
+mutable struct GibbsState
     state_data::StateData
     state_dp::StateDP
     state_theta::StateTheta
@@ -251,7 +251,7 @@ GibbsState(; state_data=StateData(), state_dp=StateDP(), state_theta=StateTheta(
 ## --------------------------------------------------------------------------- #
 ## Output
 
-type GibbsOut
+mutable struct GibbsOut
     out_data::Array{StateData}
     out_dp::Array{StateDP}
     out_theta::Array{StateTheta}
@@ -284,7 +284,7 @@ typealias GibbsTuple Tuple{GibbsState, GibbsInput, GibbsOut}
 ## --------------------------------------------------------------------------- #
 ## PPD objects
 
-type TreatmentEffects
+mutable struct TreatmentEffects
     ate::Vector{Float64}
     tt::Vector{Float64}
 end
@@ -293,7 +293,7 @@ end
 
 TreatmentEffects(; ate=Array(Float64,0), tt=Array(Float64,0) ) = TreatmentEffects(ate, tt)
 
-type PosteriorPredictive
+mutable struct PosteriorPredictive
     grid::LinSpace{Float64}
     ate::Array{Float64}
     tt::Array{Float64}
