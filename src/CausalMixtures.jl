@@ -5,7 +5,7 @@
 module CausalMixtures
 
 ## load packages
-using DataFrames, DataStructures, Distributions, SparseArrays, StatsModels
+using DataFrames, DataStructures, Distributions, Random, SparseArrays, StatsBase, StatsModels
 using JLD, HDF5, Printf
 ## using Rebugger
 
