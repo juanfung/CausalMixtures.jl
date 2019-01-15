@@ -1,6 +1,7 @@
 ## blocked sampler for DPM
+export dpm_blocked!
 
-function dpm_blocked!(state::GibbsState, input::GibbsInput, out::GibbsOut)
+function dpm_blocked!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=false)
     
     ## sampler parameters
     M = input.params.M
@@ -27,8 +28,13 @@ function dpm_blocked!(state::GibbsState, input::GibbsInput, out::GibbsOut)
             @printf("\nEmpty components = %d", input.priors.prior_dp.J - state.state_dp.J)
             @printf("\nUpdating component parameters and latent data...")
         end
-        
-        state = update_blocked_params!(state, input)
+
+        ## test using observed data as latent data?
+        if test
+            state = update_blocked_theta_only!(state, input)
+        else
+            state = update_blocked_params!(state, input)
+        end        
         
         ## 3. update alpha?
         if input.priors.prior_dp.alpha_shape != 0.0

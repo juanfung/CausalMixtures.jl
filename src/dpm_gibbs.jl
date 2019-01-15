@@ -1,6 +1,7 @@
 ## improved sampler for DPM
+export dpm_gibbs!
 
-function dpm_gibbs!(state::GibbsState, input::GibbsInput, out::GibbsOut)
+function dpm_gibbs!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=false)
     
     ## sampler parameters
     M = input.params.M
@@ -24,8 +25,13 @@ function dpm_gibbs!(state::GibbsState, input::GibbsInput, out::GibbsOut)
         
         ## 2. update theta and latent data
         if verbose && mod(M, m) == 0 @printf("\nUpdating component parameters and latent data...") end
-        
-        state = update_params!(state, input)
+
+        ## test using observed data as latent data?
+        if test
+            state = update_theta_only!(state, input)
+        else
+            state = update_params!(state, input)
+        end
         
         ## 3. update alpha?
         if input.priors.prior_dp.alpha_shape != 0.0

@@ -1,4 +1,7 @@
 ## misc functions
+export flip_mat, NobileWishart, truncnorm, standardize #
+export rescale_beta, rescale_output, check_y, rand_cdf, acf_var, acf_var2, batch_var, ppd_cdf # processing output
+export make_table
 
 ## --------------------------------------------------------------------------- #
 ## helper functions
@@ -12,7 +15,8 @@ function NobileWishart(nu::Int64, V::Array{Float64})
     
     ## lower triangular Cholesky factor for V^-1
     I3 = eye(3)
-    L = chol(flip_mat(V)\I3, Val{:L})
+    ##L = chol(flip_mat(V)\I3, Val{:L}) ## deprecated
+    L = ctranspose( chol( Hermitian(flip_mat(V)\I3) ) )
 
     ## initialize lower triangular A
     A = zeros(3, 3)
@@ -85,7 +89,7 @@ end
 
 
 ## re-scale coefficients, redux
-function rescale_beta(beta::Array{Float64}, xs::ScaleData, ys::ScaleData)
+function rescale_beta(beta::Vector{Float64}, xs::ScaleData, ys::ScaleData)
 
     x = xs.a
     mx = xs.m
@@ -212,7 +216,8 @@ end
 
 ## --------------------------------------------------------------------------- #
 ## function to make tables
-function make_table(a::Vector, b::Vector; tab_name::ASCIIString="tab", tab_path::ASCIIString=pwd(),
+##function make_table(t::TreatmentEffects; expo::Bool=false, ...)
+function make_table(a::Vector, b::Vector; tab_name::String="tab", tab_path::String=pwd(),
                     y::Float64=0.0, output::Bool=true)
     
     ## Input:

@@ -1,4 +1,5 @@
 ## Gibbs sampler for FMN model
+export dpm_fmn!
 
 function dpm_fmn!(state::GibbsState, input::GibbsInput, out::GibbsOut)
     

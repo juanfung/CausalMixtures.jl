@@ -1,7 +1,9 @@
+export dpm_init, dpm_chain!, dpm_dump!, dpm!
+
 ## initialize, chain, dump, etc.
 
 ## function to select sampler
-function set_sampler(model::ASCIIString)
+function set_sampler(model::String)
 
     if model == "dpm"
         f = dpm_gibbs!
@@ -132,6 +134,8 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
         ## initialize weights
         for k in sort(collect(keys(state_dp.njs))) get!(state_dp.ws, k, BlockedWeights()) end
         state_dp = compute_weights!(state_dp)
+    elseif input.params.model == "fmn"
+        state_dp.alpha = state_dp.alpha / float(state_dp.J)
     end
         
     ## 2c. initialize theta:
@@ -171,7 +175,7 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
 end
 
 ## append new output to old
-function dpm_chain!(state::GibbsState, input::GibbsInput, out::GibbsOut)
+function dpm_chain!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=false)
     ## 1. pre-allocate output
     ##out = GibbsOut( [out, Array(StateTheta, input.params.M) ] )    
     dpm_sampler = set_sampler(input.params.model)
@@ -179,7 +183,7 @@ function dpm_chain!(state::GibbsState, input::GibbsInput, out::GibbsOut)
     out_new = GibbsOut(input.params.M)
     ## 2. run sampler
     println("Continuing from last state...")
-    state, input, out_new = dpm_sampler( state, input, out_new )
+    state, input, out_new = dpm_sampler( state, input, out_new, test=test )
     ## append new output to old output
     ##out.out_M += out_new.out_M
     append!(out.out_data, out_new.out_data)
@@ -195,7 +199,7 @@ end
 ## NB: Assumes fname exists!
 ## TODO: Re-write for consistency with chain_dpm.jl
 function dpm_dump!(state::GibbsState, input::GibbsInput, out::GibbsOut;
-                   fname::ASCIIString="out", dir::ASCIIString="./")
+                   fname::String="out", dir::String="./")
     old_m = state.state_sampler.batch_m
     ##batch_n = state.state_sampler.batch_n
     ##batch_1 = state.state_sampler.batch_1
@@ -228,15 +232,15 @@ function dpm_dump!(state::GibbsState, input::GibbsInput, out::GibbsOut;
     state.state_sampler.batch_1 += state.state_sampler.batch_m # increment starting point
     dpm_sampler = set_sampler(input.params.model)
     if input.params.verbose println("Continuing from last state...") end
-    state, input, out = dpm_sampler( state, input, out )
+    state, input, out = dpm_sampler( state, input, out)
     return (state, input, out)
 end
 
 ## wrapper to call sampler
-function dpm!(state::GibbsState, input::GibbsInput, out::GibbsOut=GibbsOut(0))
+function dpm!(state::GibbsState, input::GibbsInput, out::GibbsOut=GibbsOut(0); test=false)
     if ( state.state_sampler.chain && length(out.out_data) > 0 )
         ## append output
-        out_tup = dpm_chain!(state, input, out)
+        out_tup = dpm_chain!(state, input, out, test = test)
     else
         ## no out given?
         if length(out.out_data) == 0 ## || state.state_sampler.chain == false )
@@ -244,7 +248,7 @@ function dpm!(state::GibbsState, input::GibbsInput, out::GibbsOut=GibbsOut(0))
         end
         ## run new chain
         dpm_sampler = set_sampler(input.params.model)
-        out_tup = dpm_sampler(state, input, out)
+        out_tup = dpm_sampler(state, input, out, test=test)
     end    
     return out_tup    
 end

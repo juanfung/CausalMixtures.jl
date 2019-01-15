@@ -1,7 +1,8 @@
 ## parallelized ppd draws
+export select_ppd, single_dpm_ppd, single_blocked_ppd, single_fmn_ppd, single_gaussian_ppd, setup_ppd, parallel_ppd, parallel_rand_ppd
 
 ## select random draw function
-function select_ppd(model::ASCIIString="dpm")
+function select_ppd(model::String="dpm")
     # select ppd function
     if model == "dpm"
         return single_dpm_ppd
@@ -170,3 +171,23 @@ function parallel_rand_ppd(out_path::AbstractString, z_path::AbstractString)
 end
 
 
+function parallel_out_J(out_path::AbstractString)    
+    
+    path_to_output = joinpath(out_path, "output")    
+    outs = readdir( path_to_output )
+
+    function dist_out_J(p::AbstractString) # or ByteString        
+        o = JLD.jldopen( joinpath(path_to_output, p), "r")        
+        out = read(o, "out")        
+        close(o)        
+        outJ = CausalMixtures.out_J(out)        
+        return outJ
+        
+    end
+    
+    outJ_par = pmap(dist_out_J, outs)
+
+    return vcat(outJ_par...)
+
+end
+    

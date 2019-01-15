@@ -1,4 +1,5 @@
 ## benchmark Gaussian model
+export dpm_gaussian!
 
 function dpm_gaussian!(state::GibbsState, input::GibbsInput, out::GibbsOut)
     

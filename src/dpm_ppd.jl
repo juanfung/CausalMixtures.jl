@@ -1,4 +1,5 @@
 ## treatment effect posterior predictives
+export dpm_ppd, rand_ppd, rand_dpm, rand_blocked, rand_gaussian, dpm_ate 
 
 ## --------------------------------------------------------------------------- #
 ## TODO: dpm_ppd computes posterior predictive density values
@@ -125,7 +126,7 @@ function rand_blocked(out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64}) # als
         resize!(ynew, 0)
         resize!(w, 0)
     end
-    return reshape(ynew_out, 3, length(out.out_dp))            
+    return reshape(ynew_out, 3, length(out.out_dp)) 
 end
 
 function rand_fmn(out::GibbsOut, input::GibbsInput, hnew::SparseMatrixCSC{Float64,Int64}) # also works for fmn
@@ -214,4 +215,16 @@ function dpm_density(ynew::Matrix{Float64}, input::GibbsInput)
     
     return PPD(grid=linspace(1,1,1), ate=ateNew, tt=ttNew)
 
+end
+
+## --------------------------------------------------------------------------- #
+## output active components
+function out_J(out::GibbsOut) #, input::GibbsInput)
+    ##model = input.params.model
+    ##if !in(model, ["dpm", "blocked"]) error("Model is not a DP Mixture!") end
+    outJ = Array(Int64, length(out.out_dp))
+    for m in 1:length(out.out_dp)
+        outJ[m] = out.out_dp[m].J
+    end
+    return outJ
 end
