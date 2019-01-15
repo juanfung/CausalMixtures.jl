@@ -10,6 +10,8 @@ using JLD, HDF5, Printf
 ## using Rebugger
 import Base.+, Base.-, Base.*
 
+export DataFrames, Distributions, StatsBase, StatsModels, Random, JLD
+
 ## --------------------------------------------------------------------------- #
 ## Objects:
 ## GibbsInput: {Data, Params, Priors}
