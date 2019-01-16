@@ -80,7 +80,7 @@ function standardize(A::Array{Float64}; B=2)
             s[k] = std(A[:,k])
             m[k] = mean(A[:,k])            
         end
-        a[:,k] = (A[:,k] - m[k])/s[k]
+        a[:,k] = (A[:,k] .- m[k])/s[k]
     end
     
     return ScaleData(a=a, m=m, s=s)
