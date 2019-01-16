@@ -75,12 +75,12 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     end
     
     ## construct block-diag H
-    Hmat = blkdiag(sparse(zmats.a), sparse(xmats.a), sparse(xmats.a))
+    Hmat = blockdiag(sparse(zmats.a), sparse(xmats.a), sparse(xmats.a))
     if verbose println("Hmat dim:\nN = ", size(Hmat, 1), ", K = ", ktot) end
     
     ## truncated normal support for latent data
-    lower = ifelse( d .== 1, 0, -Inf )
-    upper = ifelse( d .== 1, Inf, 0 )
+    lower = [ di == 1 ?  0 : -Inf for di in d ]
+    upper = [ di == 1 ? Inf : 0 for di in d ]
     
     ## collect data objects
     input_data = InputData(y=ys, d=d, lower=lower, upper=upper, Hmat=Hmat)
