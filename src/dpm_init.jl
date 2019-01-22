@@ -88,13 +88,13 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     ## collect all inputs
     if priors.prior_theta.prior_beta.Vinv
         ## convert to covariance
-        V = priors.prior_theta.prior_beta.V\eye(ktot)
+        V = inv(priors.prior_theta.prior_beta.V)
     else
         ## save covariance and convert to precision
         V = priors.prior_theta.prior_beta.V
         ##prior_beta = PriorBeta(priors.prior_theta.prior_beta.mu, V\eye(ktot), true)
         priors = InputPriors(priors.prior_dp,
-                             PriorTheta(PriorBeta(mu=priors.prior_theta.prior_beta.mu, V=V\eye(ktot), Vinv=true),
+                             PriorTheta(PriorBeta(mu=priors.prior_theta.prior_beta.mu, V=inv(V), Vinv=true),
                                         priors.prior_Sigma))
     end
     input = GibbsInput(data=input_data, dims=dims, params=params, priors=priors)

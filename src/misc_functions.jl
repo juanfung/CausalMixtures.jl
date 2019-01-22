@@ -7,16 +7,16 @@ export make_table
 ## helper functions
 
 ## flip rows 1,3 and columns 1,3 for 3x3 matrix
-function flip_mat(A::Array) flipdim(flipdim(A, 1), 2) end
+function flip_mat(A::Array) reverse(reverse(A, dims=1), dims=2) end
 
 
 ## sample 3x3 A ~ IW(nu, V) with constraint A(1,1)=1
 function NobileWishart(nu::Int64, V::Array{Float64})
     
     ## lower triangular Cholesky factor for V^-1
-    I3 = eye(3)
+    I3 = Matrix(1.0I, 3, 3)
     ##L = chol(flip_mat(V)\I3, Val{:L}) ## deprecated
-    L = ctranspose( chol( Hermitian(flip_mat(V)\I3) ) )
+    L = adjoint( cholesky( Hermitian(flip_mat(V)\I3) ).U )
 
     ## initialize lower triangular A
     A = zeros(3, 3)

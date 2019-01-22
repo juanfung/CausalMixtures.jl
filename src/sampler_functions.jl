@@ -467,7 +467,7 @@ end
 
 ## sample theta from prior
 function sample_prior_theta!(state_theta::StateTheta, prior_theta::PriorTheta, j::Int64)
-    beta_j = prior_theta.prior_beta.mu + chol(prior_theta.prior_beta.V)'*randn(length(prior_theta.prior_beta.mu))
+    beta_j = prior_theta.prior_beta.mu + cholesky(prior_theta.prior_beta.V).U'*randn(length(prior_theta.prior_beta.mu))
     Sigma_j = NobileWishart(prior_theta.prior_Sigma.rho, prior_theta.prior_Sigma.rho * prior_theta.prior_Sigma.R )
     state_theta[j] = Theta(beta=beta_j, Sigma=Sigma_j)
     return state_theta
