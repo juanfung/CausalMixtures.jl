@@ -133,7 +133,7 @@ end
 ## check data augmentation
 function check_y(input::GibbsInput, out::GibbsOut)
     my, sy = input.data.y.m[1], input.data.y.s[1]
-    y_out = Array( Float64, input.dims.n, length(out.out_data) )
+    y_out = Array{Float64}(undef, input.dims.n, length(out.out_data) )
     for m in 1:length(out.out_data)
         y_out[:,m] = input.data.d .* out.out_data[m].y1 + (1 - input.data.d) .* out.out_data[m].y0
     end
