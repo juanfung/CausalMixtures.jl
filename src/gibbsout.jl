@@ -7,11 +7,12 @@ mutable struct GibbsOut
     out_theta::Array{StateTheta}
 end
 
-GibbsOut(; out_data=Array(StateData,0), out_dp=Array(StateDP,0), out_theta=Array(StateTheta,0)) =
-    GibbsOut(out_data, out_dp, out_theta)
-
 ## generate GibbsOut given num iterations, M (or input.params?)
-GibbsOut(M::Int64) = GibbsOut(Array(StateData, M), Array(StateDP, M), Array(StateTheta, M))
+GibbsOut(M::Int64) = GibbsOut(out_data=Array{StateData}(undef, M),
+                              out_dp=Array{StateDP}(undef, M),
+                              out_theta=Array{StateTheta}(undef, M))
+
+GibbsOut() = GibbsOut(0) 
 
 ## TODO: output as subtype of AbstractArray
 ## TODO: DO NOT SAVE state_sampler ...
