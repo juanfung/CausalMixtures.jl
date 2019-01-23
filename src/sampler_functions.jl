@@ -120,7 +120,7 @@ function sample_label!(state::GibbsState, input::GibbsInput, i::Int64)
     
     ## combine and normalize probabilities
     push!(w, w_new)
-    scale!(w, 1/sum(w))
+    rmul!(w, 1/sum(w))
     
     ## sample component
     ji = rand( Distributions.Categorical(w) )
