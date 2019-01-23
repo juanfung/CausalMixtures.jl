@@ -88,9 +88,9 @@ function sample_new_Sigma(p::PriorTheta, Hi::SparseMatrixCSC{Float64,Int64}, yi:
 end
 
 function new_beta_cov(p::PriorTheta, Hi::SparseMatrixCSC{Float64,Int64}, yi::Vector{Float64}, S::Matrix{Float64})
-    xb = *(Hi', S\eye(3)) # ktot x 3
+    xb = *(Hi', inv(S)) # ktot x 3
     vj = xb*Hi + p.prior_beta.V # ktot x ktot
-    return ( xb, vj\eye(vj) )
+    return ( xb, inv(vj) )
 end
 
 function sample_new_beta(xb::Matrix{Float64}, vj::Matrix{Float64}, Vmu::Vector{Float64}, yi::Vector{Float64})
@@ -194,10 +194,10 @@ function update_theta!(state::GibbsState, input::GibbsInput, j::Int64, idx::Vect
     
     ## 2. update beta
     function sample_beta( prior_theta::PriorTheta, state::GibbsState )
-        sigXi = kron( (Sigma_j\eye(3)), speye(nj) ) # 3nj x 3nj
+        sigXi = kron( inv(Sigma_j), sparse(1.0I, nj, nj) ) # 3nj x 3nj
         xb = Hj'*sigXi # ktot x 3nj
         vj = xb*Hj + prior_theta.prior_beta.V # ktot x ktot
-        vj = vj\eye(vj) # ktot x ktot
+        vj = inv(vj) # ktot x ktot
         mj = *( vj, xb*yij + state.state_sampler.Vmu ) # ktot x 1
         beta_j = mj + chol( Hermitian(vj) )'*randn(length(mj))
         return beta_j
