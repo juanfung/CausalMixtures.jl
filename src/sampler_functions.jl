@@ -151,7 +151,7 @@ function update_params!(state::GibbsState, input::GibbsInput)
         if state.state_dp.njs[j] == 0 continue end
         
         idx = sort( collect( keys( ( filter( (k,v) -> v == j, state.state_dp.labels ) ) ) ) )
-        Hj = input.data.Hmat[vcat(idx, idx+input.dims.n, idx+2*input.dims.n),:] # 3nj x ktot
+        Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n), :] # 3nj x ktot
         
         ## update theta
         state = update_theta!(state, input, j, idx, Hj)
@@ -199,7 +199,7 @@ function update_theta!(state::GibbsState, input::GibbsInput, j::Int64, idx::Vect
         vj = xb*Hj + prior_theta.prior_beta.V # ktot x ktot
         vj = inv(vj) # ktot x ktot
         mj = *( vj, xb*yij + state.state_sampler.Vmu ) # ktot x 1
-        beta_j = mj + chol( Hermitian(vj) )'*randn(length(mj))
+        beta_j = mj + cholesky( Hermitian(vj) ).U'*randn(length(mj))
         return beta_j
     end
     
@@ -249,7 +249,7 @@ function update_latent!(state::GibbsState, input::GibbsInput, j::Int64, idx::Vec
         mu_miss = (1 .- dj).*mu1 + dj.*mu0
         var_miss = (1 .- dj)*omega1 + dj*omega0
         ## compute missing outcome
-        ymiss_j = mu_miss + sqrt(var_miss).*randn(nj)
+        ymiss_j = mu_miss + sqrt.(var_miss) .* randn(nj)
         return ymiss_j
     end
     
@@ -576,7 +576,7 @@ function update_ymiss_only!(state::GibbsState, input::GibbsInput, j::Int64, idx:
         mu_miss = ( (1 .- dj) .* mu1 ) + ( dj .* mu0 )  
         var_miss = ( (1 .- dj) * omega1 ) + ( dj * omega0 )
         ## compute missing outcome
-        return mu_miss + sqrt(var_miss).*randn(nj)
+        return mu_miss + sqrt.(var_miss) .* randn(nj)
     end
     
     ymiss_j = sample_ymiss(state.state_theta[j].Sigma)
