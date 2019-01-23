@@ -95,7 +95,7 @@ end
 
 function sample_new_beta(xb::Matrix{Float64}, vj::Matrix{Float64}, Vmu::Vector{Float64}, yi::Vector{Float64})
     mj = *( vj, xb*yi + Vmu ) # ktot x 1 
-    return mj + chol( Hermitian(vj) )'*randn(length(mj)) # ktot x 1
+    return mj + cholesky( Hermitian(vj) ).U'*randn(length(mj)) # ktot x 1
 end
 
 ## compute probability of theta
@@ -109,7 +109,7 @@ function sample_label!(state::GibbsState, input::GibbsInput, i::Int64)
     ## Prob(label i = existing component)
     Hi = input.data.Hmat[vcat(i, i+input.dims.n, i+2*input.dims.n), :] # 3 x ktot
     yi = [state.state_data.dstar[i], state.state_data.y1[i], state.state_data.y0[i]] # 3 x 1
-    w = Array(Float64, state.state_dp.J)
+    w = Array{Float64}(undef, state.state_dp.J)
     @inbounds for j in 1:state.state_dp.J
         w[j] = state.state_dp.njs[j] * exp( prob_theta(state.state_theta[j], Hi, yi) ) / state.state_sampler.zdenom
     end
@@ -366,7 +366,7 @@ function sample_fmn_label!(state::GibbsState, input::GibbsInput, i::Int64)
         w[j] = ( state.state_dp.njs[j] + state.state_dp.alpha ) *
         exp( prob_theta(state.state_theta[j], Hi, yi) ) / state.state_sampler.zdenom
     end    
-    scale!(w, 1/sum(w))    
+    rmul!(w, 1/sum(w))    
     ## sample component
     ji = rand( Distributions.Categorical(w) )
     state.state_dp.labels[i] = ji    
@@ -450,7 +450,7 @@ function sample_blocked_label!(state::GibbsState, input::GibbsInput, i::Int64)
     @inbounds for j in 1:length(state.state_dp.njs)
         w[j] = state.state_dp.ws[j].w * exp( prob_theta(state.state_theta[j], Hi, yi) ) #/ state.state_sampler.zdenom
     end
-    scale!(w, 1/sum(w))
+    rmul!(w, 1/sum(w))
     ## 2. sample ji
     ji = rand( Distributions.Categorical(w) )
     state.state_dp.labels[i] = ji
