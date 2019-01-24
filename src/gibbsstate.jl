@@ -48,7 +48,7 @@ StateDP(; J=2,
 ##    StateDP(J, labels, njs, alpha, eta)
 
 ## copy method
-Base.copy(m::StateDP) = StateDP([ copy(getfield(m, k)) for k = 1:length(fieldnames(m)) ]...)
+Base.copy(m::StateDP) = StateDP([ copy(getfield(m, k)) for k = 1:length(fieldnames(typeof(m))) ]...)
 
 ## collect theta state, where theta = beta-Sigma pair
 mutable struct Theta
@@ -83,7 +83,7 @@ mutable struct StateData
 end
 
 StateData(; dstar=[0.0], y1=[0.0], y0=[0.0]) = StateData(dstar, y1, y0)
-Base.copy(m::StateData) = StateData([ copy(getfield(m, k)) for k = 1:length(fieldnames(m)) ]...)
+Base.copy(m::StateData) = StateData([ copy(getfield(m, k)) for k = 1:length(fieldnames(typeof(m))) ]...)
 
 ## collect sampler state
 mutable struct StateSampler
