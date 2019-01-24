@@ -6,11 +6,11 @@ module CausalMixtures
 
 ## load packages
 using DataFrames, DataStructures, Distributions, LinearAlgebra, Random, SparseArrays, StatsBase, StatsModels
-using JLD, HDF5, Printf
+using DelimitedFiles, JLD, HDF5, Printf
 ## using Rebugger
 import Base.+, Base.-, Base.*
 
-export DataFrames, Distributions, StatsBase, StatsModels, Random, JLD
+export DataFrames, Distributions, LinearAlgebra, StatsBase, StatsModels, Random, JLD
 
 ## --------------------------------------------------------------------------- #
 ## Objects:
