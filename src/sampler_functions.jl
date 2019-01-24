@@ -150,7 +150,7 @@ function update_params!(state::GibbsState, input::GibbsInput)
         
         if state.state_dp.njs[j] == 0 continue end
         
-        idx = sort( collect( keys( ( filter( (k,v) -> v == j, state.state_dp.labels ) ) ) ) )
+        idx = sort( collect( keys( ( filter( v -> v.second == j, state.state_dp.labels ) ) ) ) )
         Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n), :] # 3nj x ktot
         
         ## update theta
@@ -385,7 +385,7 @@ function update_weights!(state::GibbsState, input::GibbsInput)
     v, w = ones(state.state_dp.J), zeros(state.state_dp.J)
     for j in 1:state.state_dp.J # for j in sort(collect(keys(state.state_dp.njs)))
         if j < state.state_dp.J
-            njj = sum( values( filter( (k,v) -> k > j, state.state_dp.njs) ) )
+            njj = sum( values( filter( k -> k.first > j, state.state_dp.njs) ) )
             ##njj = reduce(+, drop( values(state.state_dp.njs), j ) ).nj
             ##state.state_dp.njs[j].v =
             v[j] = rand( Distributions.Beta( 1 + state.state_dp.njs[j], state.state_dp.alpha + njj ) )
@@ -400,7 +400,7 @@ end
 ## another approach
 function compute_v(s::StateDP, j::Int64)
     if j < length(s.njs)
-        njj = sum( values( filter( (k,v) -> k > j, s.njs) ) )
+        njj = sum( values( filter( k -> k.first > j, s.njs) ) )
         v = rand( Distributions.Beta( 1 + s.njs[j], s.alpha + njj))
     else
         v = 1.0
@@ -461,7 +461,7 @@ end
 
 ## montitor number of active components
 function update_J!(s::StateDP)
-    s.J = length( filter( (k, val) -> val != 0, s.njs) )
+    s.J = length( filter( v -> v.second != 0, s.njs) )
     return s
 end
 
@@ -482,7 +482,7 @@ function update_blocked_params!(state::GibbsState, input::GibbsInput)
             state.state_theta = sample_prior_theta!(state.state_theta, input.priors.prior_theta, j)
         else
             ## sample from posterior
-            idx = sort( collect( keys( ( filter( (k,v) -> v == j, state.state_dp.labels ) ) ) ) )
+            idx = sort( collect( keys( ( filter( v -> v.second == j, state.state_dp.labels ) ) ) ) )
             Hj = input.data.Hmat[vcat(idx, idx+input.dims.n, idx+2*input.dims.n),:] # 3nj x ktot        
             ## update theta
             state = update_theta!(state, input, j, idx, Hj)
@@ -517,7 +517,7 @@ end
 function update_latent_only!(state::GibbsState, input::GibbsInput)
     @inbounds for j in 1:state.state_dp.J # k in keys(state.state_theta) or keys(state.state_dp.njs)        
         if state.state_dp.njs[j] == 0 continue end        
-        idx = sort( collect( keys( ( filter( (k,v) -> v == j, state.state_dp.labels ) ) ) ) )
+        idx = sort( collect( keys( ( filter( v -> v.second == j, state.state_dp.labels ) ) ) ) )
         ##Hj = input.data.Hmat[vcat(idx, idx+input.dims.n, idx+2*input.dims.n),:] # 3nj x ktot
         ## update latent data
         state = update_ymiss_only!(state, input, j, idx)
@@ -529,7 +529,7 @@ end
 function update_theta_only!(state::GibbsState, input::GibbsInput)
     @inbounds for j in 1:state.state_dp.J # k in keys(state.state_theta) or keys(state.state_dp.njs)        
         if state.state_dp.njs[j] == 0 continue end        
-        idx = sort( collect( keys( ( filter( (k,v) -> v == j, state.state_dp.labels ) ) ) ) )
+        idx = sort( collect( keys( ( filter( v -> v.second == j, state.state_dp.labels ) ) ) ) )
         Hj = input.data.Hmat[vcat(idx, idx+input.dims.n, idx+2*input.dims.n),:] # 3nj x ktot        
         ## update theta
         state = update_theta!(state, input, j, idx, Hj)        
@@ -610,7 +610,7 @@ function update_blocked_theta_only!(state::GibbsState, input::GibbsInput)
             state.state_theta = sample_prior_theta!(state.state_theta, input.priors.prior_theta, j)
         else
             ## sample from posterior
-            idx = sort( collect( keys( ( filter( (k,v) -> v == j, state.state_dp.labels ) ) ) ) )
+            idx = sort( collect( keys( ( filter( v -> v.second == j, state.state_dp.labels ) ) ) ) )
             Hj = input.data.Hmat[vcat(idx, idx+input.dims.n, idx+2*input.dims.n),:] # 3nj x ktot        
             ## update theta
             state = update_theta!(state, input, j, idx, Hj)
