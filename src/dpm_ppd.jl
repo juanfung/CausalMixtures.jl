@@ -12,16 +12,16 @@ function dpm_ppd(out::GibbsOut, znew::Vector{Float64}, prior_theta::PriorTheta;
     mu = prior_theta.prior_beta.mu
     if prior_theta.prior_beta.Vinv
         ## convert precision to covariance
-        V = prior_theta.prior_beta.V\eye(prior_theta.prior_beta.V)
+        V = inv(prior_theta.prior_beta.V)
     end
     
     ## predictors
-    hnew = blkdiag(sparse(znew'), sparse(znew[xid]'), sparse(znew[xid]')) # 3 x ktot
+    hnew = blockdiag(sparse(znew'), sparse(znew[xid]'), sparse(znew[xid]')) # 3 x ktot
     
     ## pre-allocate storage
-    ynew_out = Array(Float64, 0) #Array(Float64, 3M)
-    ynew = Array(Float64, 0)
-    w = Array(Float64, 0)
+    ynew_out = Array{Float64}(undef, 0) #Array{Float64}(undef, 3M)
+    ynew = Array{Float64}(undef, 0)
+    w = Array{Float64}(undef, 0)
     
     for m in 1:length(out.out_dp)
         
@@ -71,12 +71,12 @@ function rand_dpm(out::GibbsOut, p::PriorTheta, hnew::SparseMatrixCSC{Float64,In
     mu = p.prior_beta.mu
     if p.prior_beta.Vinv
         ## convert precision to covariance
-        V = p.prior_beta.V\eye(p.prior_beta.V)
+        V = inv(p.prior_beta.V)
     end
     ## pre-allocate storage
-    ynew_out = Array(Float64, 0) #Array(Float64, 3M)
-    ynew = Array(Float64, 0)
-    w = Array(Float64, 0)    
+    ynew_out = Array{Float64}(undef, 0) #Array{Float64}(undef, 3M)
+    ynew = Array{Float64}(undef, 0)
+    w = Array{Float64}(undef, 0)    
     for m in 1:length(out.out_dp)        
         alpha = out.out_dp[m].alpha
         J = out.out_dp[m].J
@@ -107,9 +107,9 @@ end
 function rand_blocked(out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64}) # also works for fmn
     ## setup...
     ## pre-allocate storage
-    ynew_out = Array(Float64, 0) #Array(Float64, 3M)
-    ynew = Array(Float64, 0)
-    w = Array(Float64, 0)
+    ynew_out = Array{Float64}(undef, 0) #Array{Float64}(undef, 3M)
+    ynew = Array{Float64}(undef, 0)
+    w = Array{Float64}(undef, 0)
     for m in 1:length(out.out_dp)
         theta = out.out_theta[m]
         ws = out.out_dp[m].ws
@@ -134,9 +134,9 @@ function rand_fmn(out::GibbsOut, input::GibbsInput, hnew::SparseMatrixCSC{Float6
     J = input.priors.prior_dp.J
     aJ = input.priors.prior_dp.alpha/float(J)
     ## pre-allocate storage
-    ynew_out = Array(Float64, 0) #Array(Float64, 3M)
-    ynew = Array(Float64, 0)
-    w = Array(Float64, 0)
+    ynew_out = Array{Float64}(undef, 0) #Array{Float64}(undef, 3M)
+    ynew = Array{Float64}(undef, 0)
+    w = Array{Float64}(undef, 0)
     for m in 1:length(out.out_dp)
         theta = out.out_theta[m]
         njs = out.out_dp[m].njs
@@ -158,9 +158,9 @@ end
 function rand_gaussian(out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64})
     ## setup...
     ## pre-allocate storage
-    ynew_out = Array(Float64, 0) #Array(Float64, 3M)
-    ynew = Array(Float64, 0)
-    #w = Array(Float64, 0)
+    ynew_out = Array{Float64}(undef, 0) #Array{Float64}(undef, 3M)
+    ynew = Array{Float64}(undef, 0)
+    #w = Array{Float64}(undef, 0)
     for m in 1:length(out.out_dp)
         hb = hnew * out.out_theta[m][1].beta
         append!( ynew_out, hb + chol(out.out_theta[m][1].Sigma)'*randn(3) )
@@ -173,7 +173,7 @@ function rand_gaussian(out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64})
 end
 
 function rand_ppd(out::GibbsOut, input::GibbsInput, znew::Vector{Float64})
-    hnew = blkdiag(sparse(znew'), sparse(znew[1:input.dims.kx]'), sparse(znew[1:input.dims.kx]'))
+    hnew = blockdiag(sparse(znew'), sparse(znew[1:input.dims.kx]'), sparse(znew[1:input.dims.kx]'))
     if input.params.model == "dpm"
         ppd = rand_dpm(out, input.priors.prior_theta, hnew)
     elseif input.params.model == "blocked"
@@ -222,7 +222,7 @@ end
 function out_J(out::GibbsOut) #, input::GibbsInput)
     ##model = input.params.model
     ##if !in(model, ["dpm", "blocked"]) error("Model is not a DP Mixture!") end
-    outJ = Array(Int64, length(out.out_dp))
+    outJ = Array{Int64}(undef, length(out.out_dp))
     for m in 1:length(out.out_dp)
         outJ[m] = out.out_dp[m].J
     end
