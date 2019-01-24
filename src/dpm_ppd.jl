@@ -33,15 +33,15 @@ function dpm_ppd(out::GibbsOut, znew::Vector{Float64}, prior_theta::PriorTheta;
         
         for j in 1:J
             hb = hnew*theta[j].beta
-            append!( ynew, hb + chol(theta[j].Sigma)'*randn(3) )
+            append!( ynew, hb + cholesky(theta[j].Sigma).U'*randn(3) )
             push!( w, njs[j]*exp(logpdf(MvNormal(hb, theta[j].Sigma), ynew[(3*(j-1)+1):3*j])) )
         end
         
         ## draw from prior
         Sigma = NobileWishart(rho, rhoR)
-        beta = mu + chol(V)'*randn(length(mu))
+        beta = mu + cholesky(V).U'*randn(length(mu))
         hb = hnew*beta
-        append!( ynew, hb + chol(Sigma)'*randn(3) )
+        append!( ynew, hb + cholesky(Sigma).U'*randn(3) )
         push!( w, alpha*exp(logpdf(MvNormal(hb, Sigma), ynew[(3*J+1):3*(J+1)])) )
         
         ##jm = findmax(w)[2]
@@ -84,14 +84,14 @@ function rand_dpm(out::GibbsOut, p::PriorTheta, hnew::SparseMatrixCSC{Float64,In
         theta = out.out_theta[m]        
         for j in 1:J
             hb = hnew*theta[j].beta
-            append!( ynew, hb + chol(theta[j].Sigma)'*randn(3) )
+            append!( ynew, hb + cholesky(theta[j].Sigma).U'*randn(3) )
             push!( w, njs[j]*exp(logpdf(MvNormal(hb, theta[j].Sigma), ynew[(3*(j-1)+1):3*j])) )
         end        
         ## draw from prior
         Sigma = NobileWishart(rho, rhoR)
-        beta = mu + chol(V)'*randn(length(mu))
+        beta = mu + cholesky(V).U'*randn(length(mu))
         hb = hnew*beta
-        append!( ynew, hb + chol(Sigma)'*randn(3) )
+        append!( ynew, hb + cholesky(Sigma).U'*randn(3) )
         push!( w, alpha*exp(logpdf(MvNormal(hb, Sigma), ynew[(3*J+1):3*(J+1)])) )
         ## select component
         ##jm = findmax(w)[2]
@@ -116,7 +116,7 @@ function rand_blocked(out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64}) # als
         for j in keys(ws)
             wj = ws[j].w
             hb = hnew * theta[j].beta
-            append!( ynew, hb + chol(theta[j].Sigma)'*randn(3) )
+            append!( ynew, hb + cholesky(theta[j].Sigma).U'*randn(3) )
             push!( w, wj*exp(logpdf(MvNormal(hb, theta[j].Sigma), ynew[(3*(j-1)+1):3*j])) )
         end
         ##jm = findmax(w)[2]
@@ -142,7 +142,7 @@ function rand_fmn(out::GibbsOut, input::GibbsInput, hnew::SparseMatrixCSC{Float6
         njs = out.out_dp[m].njs
         for j in 1:J
             hb = hnew * theta[j].beta
-            append!( ynew, hb + chol(theta[j].Sigma)'*randn(3) )
+            append!( ynew, hb + cholesky(theta[j].Sigma).U'*randn(3) )
             push!( w, (njs[j] + aJ)*exp(logpdf(MvNormal(hb, theta[j].Sigma), ynew[(3*(j-1)+1):3*j])) )
         end
         ##jm = findmax(w)[2]
@@ -163,7 +163,7 @@ function rand_gaussian(out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64})
     #w = Array{Float64}(undef, 0)
     for m in 1:length(out.out_dp)
         hb = hnew * out.out_theta[m][1].beta
-        append!( ynew_out, hb + chol(out.out_theta[m][1].Sigma)'*randn(3) )
+        append!( ynew_out, hb + cholesky(out.out_theta[m][1].Sigma).U'*randn(3) )
         #push!( w, exp(logpdf(MvNormal(hb, out.out_theta[m][1].Sigma), ynew[(3*(j-1)+1):3*j])) )
         ## reset storage
         resize!(ynew, 0)
@@ -194,7 +194,7 @@ function dpm_ate(ynew::Matrix{Float64}, input::GibbsInput)
     sy = input.data.y.s[1]
     dNew = vec(ynew[1,:])
     ateNew = vec(ynew[2,:] - ynew[3,:])*sy
-    idx = find(d -> d > 0.0, dNew)
+    idx = findall(d -> d > 0.0, dNew)
 
     ttNew = ateNew[idx]
     return TreatmentEffects(ate=ateNew, tt=ttNew)
@@ -209,7 +209,7 @@ function dpm_density(ynew::Matrix{Float64}, input::GibbsInput)
     dNew = vec(ynew[1,:])
     ateNew = vec(ynew[2,:] - ynew[3,:])*sy
     ## ynew -> tt -> tt.dens
-    idx = find(d -> d > 0.0, dNew)
+    idx = findall(d -> d > 0.0, dNew)
     ttNew = ateNew[idx]
     ## PPD(grid, ate.dens, tt.dens)
     
