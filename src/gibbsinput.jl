@@ -51,7 +51,7 @@ end
 
 InputParams(; M=100, scale_data=(false,false), verbose=true, model="dpm") = InputParams(M, scale_data, verbose, model)
 ## set default model to dpm
-InputParams(M::Int64, scale_data::Tuple{Bool,Bool}, verbose::Bool) = InputParams(M, scale_data, verbose, model="dpm")
+InputParams(m, s, v) = InputParams(M=m, scale_data=s, verbose=v, model="dpm")
 
 ## --------------------------------------------------------------------------- #
 ## Priors
@@ -71,14 +71,14 @@ struct PriorBeta
     Vinv::Bool # if true, precision; else, covariance
 end
 
-PriorBeta(; mu=ones(2), V=eye(2), Vinv=true) = PriorBeta(mu, V, Vinv)
+PriorBeta(; mu=ones(2), V=Matrix(1.0I, 2, 2), Vinv=true) = PriorBeta(mu, V, Vinv)
 
 struct PriorSigma
     rho::Int64
     R::Matrix{Float64}
 end
 
-PriorSigma(; rho=1, R=eye(3) ) = PriorSigma(rho, R)
+PriorSigma(; rho=1, R=Matrix(1.0I, 3, 3) ) = PriorSigma(rho, R)
 
 struct PriorTheta
     prior_beta::PriorBeta
