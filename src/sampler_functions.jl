@@ -361,7 +361,7 @@ end
 function sample_fmn_label!(state::GibbsState, input::GibbsInput, i::Int64)    
     Hi = input.data.Hmat[vcat(i, i+input.dims.n, i+2*input.dims.n), :] # 3 x ktot
     yi = [state.state_data.dstar[i], state.state_data.y1[i], state.state_data.y0[i]] # 3 x 1
-    w = Array(Float64, state.state_dp.J)
+    w = Array{Float64}(undef, state.state_dp.J)
     @inbounds for j in 1:state.state_dp.J        
         w[j] = ( state.state_dp.njs[j] + state.state_dp.alpha ) *
         exp( prob_theta(state.state_theta[j], Hi, yi) ) / state.state_sampler.zdenom
@@ -443,7 +443,7 @@ end
 function sample_blocked_label!(state::GibbsState, input::GibbsInput, i::Int64)
     Hi = input.data.Hmat[vcat(i, i+input.dims.n, i+2*input.dims.n), :]
     yi = [state.state_data.dstar[i], state.state_data.y1[i], state.state_data.y0[i]]
-    w = Array(Float64, input.priors.prior_dp.J)
+    w = Array{Float64}(undef, input.priors.prior_dp.J)
     # remove i from current component
     state.state_dp.njs[state.state_dp.labels[i]] -= 1
     ## 1. compute Pr(label i = j)
