@@ -1,7 +1,7 @@
 ## benchmark Gaussian model
 export dpm_gaussian!
 
-function dpm_gaussian!(state::GibbsState, input::GibbsInput, out::GibbsOut)
+function dpm_gaussian!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=false)
     
     ## sampler parameters
     M = input.params.M
