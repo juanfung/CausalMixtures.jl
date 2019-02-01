@@ -495,15 +495,13 @@ end
 
 ## update concentration parameter
 function fv(d::OrderedDict{Int64,BlockedWeights}; f::Function=log) #, j::Int64; f::Function=identity)
-    return reduce(+, map(val -> f(1-val), take(values(d), length(d)-1)))
+    return sum(map(val -> f(1-val), take(values(d), length(d)-1)))
     ##return map(v -> f(1-v), take(values(d), j-1) )
 end
 
 function update_blocked_alpha!(state::GibbsState, input::GibbsInput)
     a_star = input.priors.prior_dp.alpha_shape + input.priors.prior_dp.J - 1
-    ##v = reduce(+, map(val -> log(1-val), take(values(state.state_dp.ws), state.state_dp.J-1))).v
     b_star = input.priors.prior_dp.alpha_rate - fv(state.state_dp.ws)
-    ##b_star = input.priors.prior_dp.alpha_rate-reduce(+,map_v(state.state_dp.njs,state.state_dp.J,f=v->log(1-v))).v
     state.state_dp.alpha = rand( Distributions.Gamma(a_star, 1/b_star) )
     state.state_sampler.zdenom = state.state_dp.alpha + input.dims.n - 1
     return state
