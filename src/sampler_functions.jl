@@ -495,7 +495,7 @@ end
 
 ## update concentration parameter
 function fv(d::OrderedDict{Int64,BlockedWeights}; f::Function=log) #, j::Int64; f::Function=identity)
-    return reduce(+, map(val -> f(1-val.v), take(values(d), length(d)-1)))
+    return reduce(+, map(val -> f(1-val), take(values(d), length(d)-1)))
     ##return map(v -> f(1-v), take(values(d), j-1) )
 end
 
