@@ -483,7 +483,7 @@ function update_blocked_params!(state::GibbsState, input::GibbsInput)
         else
             ## sample from posterior
             idx = sort( collect( keys( ( filter( v -> v.second == j, state.state_dp.labels ) ) ) ) )
-            Hj = input.data.Hmat[vcat(idx, idx+input.dims.n, idx+2*input.dims.n),:] # 3nj x ktot        
+            Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] # 3nj x ktot        
             ## update theta
             state = update_theta!(state, input, j, idx, Hj)
             ## update latent data        
@@ -495,13 +495,13 @@ end
 
 ## update concentration parameter
 function fv(d::OrderedDict{Int64,BlockedWeights}; f::Function=log) #, j::Int64; f::Function=identity)
-    return sum(map(val -> f(1-val), take(values(d), length(d)-1)))
+    return sum(map(val -> f(1-val.v), take(values(d), length(d)-1)))
     ##return map(v -> f(1-v), take(values(d), j-1) )
 end
 
 function update_blocked_alpha!(state::GibbsState, input::GibbsInput)
     a_star = input.priors.prior_dp.alpha_shape + input.priors.prior_dp.J - 1
-    b_star = input.priors.prior_dp.alpha_rate - fv(state.state_dp.ws)
+    b_star = input.priors.prior_dp.alpha_rate - (fv(state.state_dp.ws))
     state.state_dp.alpha = rand( Distributions.Gamma(a_star, 1/b_star) )
     state.state_sampler.zdenom = state.state_dp.alpha + input.dims.n - 1
     return state
