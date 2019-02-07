@@ -14,7 +14,7 @@ function set_sampler(model::String)
     elseif model == "gaussian"
         f = dpm_gaussian!
     else
-        throw(DomainError(model, "Chosen model does not match known models"))
+        throw(DomainError(model, "chosen model does not match known models"))
     end
 
     return f
