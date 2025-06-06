@@ -141,7 +141,7 @@ end
 
 function parallel_rand_ppd(out_path::AbstractString, z_path::AbstractString)
 
-    state = JLD.jldopen( joinpath(out_path, "state.jld"), "r")
+    state = JLD2.jldopen( joinpath(out_path, "state.jld2"), "r")
     input = read(state, "input")
     close(state)
 
@@ -152,7 +152,7 @@ function parallel_rand_ppd(out_path::AbstractString, z_path::AbstractString)
 
     function dist_rand_ppd(p::AbstractString) # or ByteString
         
-        o = JLD.jldopen( joinpath(path_to_output, p), "r")
+        o = JLD2.jldopen( joinpath(path_to_output, p), "r")
         
         out = read(o, "out")
         
@@ -177,7 +177,7 @@ function parallel_out_J(out_path::AbstractString)
     outs = readdir( path_to_output )
 
     function dist_out_J(p::AbstractString) # or ByteString        
-        o = JLD.jldopen( joinpath(path_to_output, p), "r")        
+        o = JLD2.jldopen( joinpath(path_to_output, p), "r")        
         out = read(o, "out")        
         close(o)        
         outJ = CausalMixtures.out_J(out)        

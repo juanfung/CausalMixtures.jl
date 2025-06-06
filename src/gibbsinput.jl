@@ -3,8 +3,8 @@
 
 ## raw data input
 struct RawData
-    y_form::Formula
-    d_form::Formula
+    y_form::FormulaTerm
+    d_form::FormulaTerm
     df::DataFrame
 end
 
