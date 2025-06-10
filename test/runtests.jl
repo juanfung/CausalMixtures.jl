@@ -3,4 +3,5 @@ using Test
 
 include("testgibbsinput.jl")
 include("testgibbsstate.jl")
+include("testgibbsout.jl")
 # ... include other test files as needed
