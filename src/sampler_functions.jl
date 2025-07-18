@@ -270,8 +270,11 @@ function update_latent!(state::GibbsState, input::GibbsInput, j::Int64, idx::Vec
         ## compute variance
         omega_d = 1 - ( ( (Sigma[1,2]^2 * Sigma[3,3]) - 2*mid + (Sigma[1,3]^2 * Sigma[2,2]) ) / denomd )        
         @inbounds for i in 1:nj
-            dstarj[i] = rand( Distributions.TruncatedNormal(mu_d[i], sqrt(omega_d),
-                                                            input.data.lower[idx[i]], input.data.upper[idx[i]]) )
+            #dstarj[i] = rand( Distributions.TruncatedNormal(mu_d[i], sqrt(omega_d),
+            #                                                input.data.lower[idx[i]], input.data.upper[idx[i]]) )
+            dstarj[i] = rand( Distributions.truncated(
+            Normal(mu_d[i], sqrt(omega_d)), input.data.lower[idx[i]], input.data.upper[idx[i]]
+            ) )
         end
         return dstarj
     end

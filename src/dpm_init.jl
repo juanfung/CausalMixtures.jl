@@ -42,8 +42,8 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     
     ## 1. transform raw data -> model matrix
     ##    * Optional: scale data    
-    y = convert(Array, data.df[data.y_form.lhs])
-    d = convert(Array, data.df[data.d_form.lhs])
+    y = convert(Array, data.df[!, data.y_form.lhs.sym])
+    d = convert(Array, data.df[!, data.d_form.lhs.sym])
     
     xmat = ModelMatrix( ModelFrame(data.y_form, data.df) ).m
     if verbose println("Xmat dim:\nN = ", size(xmat, 1), ", K = ", size(xmat, 2)) end
@@ -62,7 +62,7 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     ## scale response?
     if scale_data[1]
         if verbose println("Scaling response...") end
-        ys = standardize(y)
+        ys = standardize(Float64.(y))
     else
         ys = ScaleData(a=y)
     end
