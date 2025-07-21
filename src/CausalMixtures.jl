@@ -51,6 +51,8 @@ include("dpm_init.jl")
 include("dpm_gibbs.jl")
 ## blocked gibbs sampler
 include("dpm_blocked.jl")
+## marginal gibbs sampler
+include("dpm_marginal.jl")
 ## fmn gibbs sampler
 include("dpm_fmn.jl")
 ## benchmark guassian gibbs sampler
