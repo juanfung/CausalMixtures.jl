@@ -619,3 +619,113 @@ function update_blocked_theta_only!(state::GibbsState, input::GibbsInput)
     end
     return state
 end
+
+## --------------------------------------------------------------------------- #
+## specialized functions for marginal sampler (finite truncation)
+
+## update labels using marginalized CRP probabilities
+function update_marginal_labels!(state::GibbsState, input::GibbsInput)
+    ## update component labels for each i
+    @inbounds for i in 1:input.dims.n
+        state = sample_marginal_label!(state, input, i)
+    end
+    ## update active component count
+    state.state_dp = update_J!(state.state_dp)
+    return state
+end
+
+## sample marginal label for observation i
+function sample_marginal_label!(state::GibbsState, input::GibbsInput, i::Int64)
+    
+    ## remove i from current component
+    ji_old = state.state_dp.labels[i]
+    state.state_dp.njs[ji_old] -= 1
+    
+    ## setup data for observation i
+    Hi = input.data.Hmat[vcat(i, i+input.dims.n, i+2*input.dims.n), :] # 3 x ktot
+    yi = [state.state_data.dstar[i], state.state_data.y1[i], state.state_data.y0[i]] # 3 x 1
+    
+    ## compute probabilities for all J components
+    w = Array{Float64}(undef, input.priors.prior_dp.J)
+    @inbounds for j in 1:input.priors.prior_dp.J
+        if state.state_dp.njs[j] > 0
+            ## existing component with data
+            w[j] = state.state_dp.njs[j] * exp(prob_theta(state.state_theta[j], Hi, yi))
+        else
+            ## empty component - sample from prior
+            theta_j = sample_new_theta(input.priors.prior_theta, state, Hi, yi)
+            w[j] = (state.state_dp.alpha / input.priors.prior_dp.J) * exp(prob_theta(theta_j, Hi, yi))
+            ## store the sampled theta for potential use
+            state.state_theta[j] = theta_j
+        end
+    end
+    
+    ## normalize probabilities
+    rmul!(w, 1/sum(w))
+    
+    ## sample new component
+    ji_new = rand(Distributions.Categorical(w))
+    state.state_dp.labels[i] = ji_new
+    
+    ## update component count
+    state.state_dp.njs[ji_new] += 1
+    
+    return state
+end
+
+## update parameters for active components only
+function update_marginal_params!(state::GibbsState, input::GibbsInput)
+    @inbounds for j in 1:input.priors.prior_dp.J
+        if state.state_dp.njs[j] == 0 
+            ## empty component - sample from prior
+            state.state_theta = sample_prior_theta!(state.state_theta, input.priors.prior_theta, j)
+        else
+            ## active component - sample from posterior
+            idx = sort(collect(keys(filter(v -> v.second == j, state.state_dp.labels))))
+            Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n), :] # 3nj x ktot
+            
+            ## update theta
+            state = update_theta!(state, input, j, idx, Hj)
+            ## update latent data        
+            state = update_latent!(state, input, j, idx, Hj)
+        end
+    end
+    return state
+end
+
+## update concentration parameter for finite marginal
+function update_marginal_alpha!(state::GibbsState, input::GibbsInput)
+    ## sample auxiliary variable
+    state.state_dp.eta = rand(Distributions.Beta(state.state_dp.alpha + 1, input.dims.n))
+    
+    ## update shape and rate parameters (same as standard sampler)
+    b_star = input.priors.prior_dp.alpha_rate - log(state.state_dp.eta)
+    a_star = input.priors.prior_dp.alpha_shape + state.state_dp.J
+    A = (input.priors.prior_dp.alpha_shape + state.state_dp.J - 1) / (input.dims.n * b_star)
+    a_star = A/(1 + A) > 0.5 ? a_star : a_star - 1
+    
+    ## sample alpha
+    state.state_dp.alpha = rand(Distributions.Gamma(a_star, 1/b_star))
+    
+    ## update zdenom (though not used in marginal approach)
+    state.state_sampler.zdenom = state.state_dp.alpha + input.dims.n - 1
+
+    return state
+end
+
+## test function: update theta only for marginal sampler
+function update_marginal_theta_only!(state::GibbsState, input::GibbsInput)
+    @inbounds for j in 1:input.priors.prior_dp.J
+        if state.state_dp.njs[j] == 0
+            ## empty component - sample from prior
+            state.state_theta = sample_prior_theta!(state.state_theta, input.priors.prior_theta, j)
+        else
+            ## active component - update theta only
+            idx = sort(collect(keys(filter(v -> v.second == j, state.state_dp.labels))))
+            Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n), :] # 3nj x ktot
+            ## update theta
+            state = update_theta!(state, input, j, idx, Hj)
+        end
+    end
+    return state
+end
