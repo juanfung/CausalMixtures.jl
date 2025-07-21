@@ -12,7 +12,9 @@ function set_sampler(model::String)
     elseif model == "fmn"
         f =  dpm_fmn!
     elseif model == "gaussian"
-        f = dpm_gaussian!
+        f = dmp_gaussian!
+    elseif model == "marginal"
+        f = dpm_marginal!
     else
         throw(DomainError(model, "chosen model does not match known models"))
     end
