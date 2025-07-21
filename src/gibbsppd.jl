@@ -17,7 +17,8 @@ mutable struct PosteriorPredictive
     late::Array{Float64}
 end
 
-PosteriorPredictive(;grid=LinRange(-2,2,2), ate=zeros(2), tt=zeros(2), late=zeros(2)) = PPD(grid, ate, tt, late)
+PosteriorPredictive(;grid=LinRange(-2,2,2), ate=zeros(2), tt=zeros(2), late=zeros(2)) = PosteriorPredictive(grid, ate, tt, late)
+
 
 PPD = PosteriorPredictive
 
