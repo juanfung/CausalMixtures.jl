@@ -479,7 +479,7 @@ end
 ## update parameters {LatentData, Theta}
 function update_blocked_params!(state::GibbsState, input::GibbsInput)
     #for k in keys(state.state_dp.ws) or keys(state.state_dp.njs)
-    @inbounds for j in 1:length(input.priors.prior_dp.J) 
+    @inbounds for j in 1:input.priors.prior_dp.J
         if state.state_dp.njs[j] == 0
             ## sample from prior
             state.state_theta = sample_prior_theta!(state.state_theta, input.priors.prior_theta, j)
