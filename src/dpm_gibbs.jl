@@ -16,15 +16,15 @@ function dpm_gibbs!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=fa
     @inbounds for m in 1:M
         
         ## 1. update labels
-        if verbose && mod(M, m) == 0 
+        if verbose && mod(m, max(1, M/10)) == 0
             @printf("\nIteration: %d\nUpdating labels...", m + state.state_sampler.batch_m )
         end
         
         state = update_labels!(state, input)
-        if verbose && mod(M, m) == 0 @printf("\nCurrent J = %d", state.state_dp.J) end
+        if verbose && mod(m, max(1, M/10)) == 0 @printf("\nCurrent J = %d", state.state_dp.J) end
         
         ## 2. update theta and latent data
-        if verbose && mod(M, m) == 0 @printf("\nUpdating component parameters and latent data...") end
+        if verbose && mod(m, max(1, M/10)) == 0 @printf("\nUpdating component parameters and latent data...") end
 
         ## test using observed data as latent data?
         if test
@@ -35,15 +35,15 @@ function dpm_gibbs!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=fa
         
         ## 3. update alpha?
         if input.priors.prior_dp.alpha_shape != 0.0
-            if verbose && mod(M, m) == 0 @printf("\nUpdating alpha...") end
+            if verbose && mod(m, max(1, M/10)) == 0 @printf("\nUpdating alpha...") end
             
             ## sample alpha
             state = update_alpha!(state, input)
-            if verbose && mod(M, m) == 0 @printf("\nCurrent alpha = %f", state.state_dp.alpha) end            
+            if verbose && mod(m, max(1, M/10)) == 0 @printf("\nCurrent alpha = %f", state.state_dp.alpha) end            
         end
         
         ## 4. save iteration m draws
-        if verbose && mod(M, m) == 0 @printf("\nDone!") end
+        if verbose && mod(m, max(1, M/10)) == 0 @printf("\nDone!") end
         
         out = update_out!(state, out, m)
         ##out[m] = state

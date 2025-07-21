@@ -16,14 +16,14 @@ function dpm_gaussian!(state::GibbsState, input::GibbsInput, out::GibbsOut; test
     @inbounds for m in 1:M
         
         ## 1. update theta and latent data
-        if verbose && mod(M, m) == 0
+        if verbose && mod(m, max(1, M/10)) == 0
             @printf("\nIteration: %d\nUpdating parameters and latent data...", m + state.state_sampler.batch_m )
         end
         
         state = update_gaussian_params!(state, input)
         
         ## 2. save iteration m draws
-        if verbose && mod(M, m) == 0 @printf("\nDone!") end
+        if verbose && mod(m, max(1, M/10)) == 0 @printf("\nDone!") end
         
         out = update_out!(state, out, m)
         
