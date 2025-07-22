@@ -88,9 +88,10 @@ function sample_new_Sigma(p::PriorTheta, Hi::SparseMatrixCSC{Float64,Int64}, yi:
 end
 
 function new_beta_cov(p::PriorTheta, Hi::SparseMatrixCSC{Float64,Int64}, yi::Vector{Float64}, S::Matrix{Float64})
-    xb = *(Hi', inv(S)) # ktot x 3
-    vj = xb*Hi + p.prior_beta.V # ktot x ktot
-    return ( xb, inv(vj) )
+    xb = Hi' / cholesky(S) # ktot x 3
+    vj = xb * Hi + p.prior_beta.V # ktot x ktot
+    vj_inv = cholesky(vj) \ Matrix{Float64}(I, size(vj)...)
+    return ( xb, vj_inv )
 end
 
 function sample_new_beta(xb::Matrix{Float64}, vj::Matrix{Float64}, Vmu::Vector{Float64}, yi::Vector{Float64})
