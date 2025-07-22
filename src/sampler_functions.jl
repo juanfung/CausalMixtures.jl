@@ -194,7 +194,7 @@ function update_theta!(state::GibbsState, input::GibbsInput, j::Int64, idx::Vect
     
     ## 2. update beta
     function sample_beta( prior_theta::PriorTheta, state::GibbsState )
-        sigXi = kron( inv(Sigma_j), sparse(1.0I, nj, nj) ) # 3nj x 3nj
+        sigXi = kron( inv(Sigma_j), sparse(I, nj, nj) ) # 3nj x 3nj
         xb = Hj'*sigXi # ktot x 3nj
         vj = xb*Hj + prior_theta.prior_beta.V # ktot x ktot
         vj = inv(vj) # ktot x ktot

@@ -93,7 +93,7 @@ function setup_ppd(out::GibbsOut, input::GibbsInput)
     if input.params.model == "dpm"
         if input.priors.prior_theta.prior_beta.Vinv
         ## convert precision to covariance
-            V = input.priors.prior_theta.prior_beta.V\eye(input.priors.prior_theta.prior_beta.V)
+            V = input.priors.prior_theta.prior_beta.V\Matrix{Float64}(I, input.priors.prior_theta.prior_beta.V, input.priors.prior_theta.prior_beta.V)
         end
         rho = input.priors.prior_theta.prior_Sigma.rho
         rhoR = rho*input.priors.prior_theta.prior_Sigma.R
