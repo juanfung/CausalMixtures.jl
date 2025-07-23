@@ -88,10 +88,16 @@ function sample_new_Sigma(p::PriorTheta, Hi::SparseMatrixCSC{Float64,Int64}, yi:
 end
 
 function new_beta_cov(p::PriorTheta, Hi::SparseMatrixCSC{Float64,Int64}, yi::Vector{Float64}, S::Matrix{Float64})
-    xb = Hi' / cholesky(S) # ktot x 3
-    vj = xb * Hi + p.prior_beta.V # ktot x ktot
-    vj_inv = cholesky(vj) \ Matrix{Float64}(I, size(vj)...)
-    return ( xb, vj_inv )
+    #Hi_dense = Matrix(Hi) # 3 x ktot
+    #xb = Hi_dense' * inv(S) # ktot x 3
+    ##xb = Hi' \ cholesky(S) # ktot x 3
+    #vj = xb * Hi_dense + p.prior_beta.V # ktot x ktot
+    ##vj_inv = cholesky(vj) \ Matrix{Float64}(I, size(vj)...)
+    #vj_inv = inv(vj)
+    ## ORIGINAL ##
+    xb = *(Hi', inv(S)) # ktot x 3
+    vj = xb*Hi + p.prior_beta.V # ktot x ktot
+    return ( xb, inv(vj) )
 end
 
 function sample_new_beta(xb::Matrix{Float64}, vj::Matrix{Float64}, Vmu::Vector{Float64}, yi::Vector{Float64})
@@ -195,25 +201,12 @@ function update_theta!(state::GibbsState, input::GibbsInput, j::Int64, idx::Vect
     
     ## 2. update beta
     function sample_beta( prior_theta::PriorTheta, state::GibbsState )
-        ##sigXi = kron( inv(Sigma_j), sparse(I, nj, nj) ) # 3nj x 3nj
-        ## xb = Hj'*sigXi # ktot x 3nj
-        Sigma_j_chol = cholesky(Sigma_j) # 3nj x 3nj
-        xb = zeros(size(Hj, 2), size(Hj, 1)) # ktot x 3nj
-        for i in 1:nj
-            block_start = (i-1)*3 + 1
-            block_end = i*3
-            Hi_block = Hj[block_start:block_end, :] # 3 x ktot
-            temp = Sigma_j_chol \ Hi_block # 3 x ktot
-            xb[:, block_start:block_end] = temp' # ktot x 3
-        end
+        sigXi = kron( inv(Sigma_j), sparse(1.0I, nj, nj) ) # 3nj x 3nj
+        xb = Hj'*sigXi # ktot x 3nj
         vj = xb*Hj + prior_theta.prior_beta.V # ktot x ktot
-        ## vj = inv(vj) # ktot x ktot
-        v_chol = cholesky(vj)
-        ## mj = *( vj, xb*yij + state.state_sampler.Vmu ) # ktot x 1
-        rhs = xb * yij + state.state_sampler.Vmu # ktot x 1
-        mj = vj_chol \ rhs # ktot x 1
-        ## beta_j = mj + cholesky( Hermitian(vj) ).U'*randn(length(mj))
-        beta_j = mj + (vj_chol.U \ randn(length(mj)))
+        vj = inv(vj) # ktot x ktot
+        mj = *( vj, xb*yij + state.state_sampler.Vmu ) # ktot x 1
+        beta_j = mj + cholesky( Hermitian(vj) ).U'*randn(length(mj))
         return beta_j
     end
     
