@@ -683,10 +683,7 @@ end
 ## update parameters for active components only
 function update_marginal_params!(state::GibbsState, input::GibbsInput)
     @inbounds for j in 1:input.priors.prior_dp.J
-        if state.state_dp.njs[j] == 0 
-            ## empty component - sample from prior
-            state.state_theta = sample_prior_theta!(state.state_theta, input.priors.prior_theta, j)
-        else
+        if state.state_dp.njs[j] > 0 # Only update active components
             ## active component - sample from posterior
             idx = sort(collect(keys(filter(v -> v.second == j, state.state_dp.labels))))
             Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n), :] # 3nj x ktot

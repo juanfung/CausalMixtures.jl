@@ -58,7 +58,8 @@ end
 
 ## --------------------------------------------------------------------------- #
 ## sample latent data from posterior
-function rand_dpm(out::GibbsOut, p::PriorTheta, hnew::SparseMatrixCSC{Float64,Int64})
+function rand_dpm(out::GibbsOut, p::PriorTheta, hnew::SparseMatrixCSC{Float64,Int64}; 
+                  component_filter::Function = j -> true)  # Default: use all components
     ## setup...
     rho = p.prior_Sigma.rho
     rhoR = rho*p.prior_Sigma.R
@@ -77,10 +78,12 @@ function rand_dpm(out::GibbsOut, p::PriorTheta, hnew::SparseMatrixCSC{Float64,In
         njs = out.out_dp[m].njs
         theta = out.out_theta[m]        
         for j in 1:J
-            hb = hnew*theta[j].beta
-            append!( ynew, hb + cholesky(theta[j].Sigma).U'*randn(3) )
-            push!( w, njs[j] )
-        end        
+            if component_filter(j) && njs[j] > 0  # Apply filter
+                hb = hnew*theta[j].beta
+                append!( ynew, hb + cholesky(theta[j].Sigma).U'*randn(3) )
+                push!( w, njs[j] )
+            end
+        end 
         ## draw from prior
         Sigma = NobileWishart(rho, rhoR)
         beta = mu + cholesky(V).U'*randn(length(mu))
@@ -164,6 +167,9 @@ function rand_ppd(out::GibbsOut, input::GibbsInput, znew::Vector{Float64})
     hnew = blockdiag(sparse(znew'), sparse(znew[1:input.dims.kx]'), sparse(znew[1:input.dims.kx]'))
     if input.params.model == "dpm"
         ppd = rand_dpm(out, input.priors.prior_theta, hnew)
+    elseif input.params.model == "marginal"
+        ppd = rand_dpm(out, input.priors.prior_theta, hnew, 
+                       component_filter = j -> out.out_dp[end].njs[j] > 0)
     elseif input.params.model == "blocked"
         ppd = rand_blocked(out, hnew)
     elseif input.params.model == "fmn"
