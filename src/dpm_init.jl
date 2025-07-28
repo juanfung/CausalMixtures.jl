@@ -10,9 +10,9 @@ function set_sampler(model::String)
     elseif model == "blocked"
         f = dpm_blocked!
     elseif model == "fmn"
-        f =  dpm_fmn!
+        f = dpm_fmn!
     elseif model == "gaussian"
-        f = dmp_gaussian!
+        f = dpm_gaussian!
     elseif model == "marginal"
         f = dpm_marginal!
     else
