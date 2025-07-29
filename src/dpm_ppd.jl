@@ -3,7 +3,7 @@ export dpm_ppd, rand_ppd, rand_dpm, rand_blocked, rand_gaussian, dpm_ate
 
 ## --------------------------------------------------------------------------- #
 ## TODO: dpm_ppd computes posterior predictive density values
-function dmp_ppd(out::GibbsOut, znew::Vector{Float64}, prior_theta::PriorTheta;
+function dpm_ppd(out::GibbsOut, znew::Vector{Float64}, prior_theta::PriorTheta;
                  ##hnew::SparseMatrixCSC{Float64,Int64}
                  xid::UnitRange=1:(length(znew)-1))
     
