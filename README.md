@@ -150,3 +150,4 @@ include("test/integration/test_hedonic_model.jl")
 - **Integration tests prove blocked/dpm work reliably** 
 - **ktot = length of parameter vector** (gamma + beta_1 + beta_0)
 - **PPD matrix is (3 × M)**: [selection, treated outcome, control outcome]
+=======
