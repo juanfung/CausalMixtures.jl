@@ -22,13 +22,13 @@ using CausalMixtures
     @test data.design_info.n_control > 0
     
     # Test true effects are reasonable
-    @test abs(data.true_effects.ate_mean) < 20
-    @test !isnan(data.true_effects.ate_mean)
+    @test abs(data.true_effects.ate) < 20
+    @test !isnan(data.true_effects.ate)
     
     # Test reproducibility with same seed
     data1 = CausalMixtures.generate_hedonic_data(30, 999)
     data2 = CausalMixtures.generate_hedonic_data(30, 999)
-    @test data1.true_effects.ate_mean == data2.true_effects.ate_mean
+    @test data1.true_effects.ate == data2.true_effects.ate
 end
     
 @testset "setup_default_priors function" begin

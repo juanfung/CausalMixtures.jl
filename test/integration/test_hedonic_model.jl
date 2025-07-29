@@ -17,7 +17,7 @@ using Test, Statistics, Random
         @test "X" in names(data.df)
         @test "Z" in names(data.df)
         
-        @test abs(data.true_effects.ate_mean) < 20
+        @test abs(data.true_effects.ate) < 20
         @test data.design_info.n == 100
         @test data.design_info.n_treated + data.design_info.n_control == 100
     end
@@ -53,7 +53,7 @@ using Test, Statistics, Random
         
         # Test treatment effects are reasonable
         @test length(tes_test.ate) == 50
-        @test abs(mean(tes_test.ate) - data_test.true_effects.ate_mean) < 8.0
+        @test abs(mean(tes_test.ate) - data_test.true_effects.ate) < 8.0
         @test !any(isnan.(tes_test.ate))
         @test !any(isinf.(tes_test.ate))
         
@@ -91,7 +91,7 @@ using Test, Statistics, Random
         
         # Test treatment effects are reasonable
         @test length(tes_test2.ate) == 50
-        @test abs(mean(tes_test2.ate) - data_test2.true_effects.ate_mean) < 8.0
+        @test abs(mean(tes_test2.ate) - data_test2.true_effects.ate) < 8.0
         @test !any(isnan.(tes_test2.ate))
         @test !any(isinf.(tes_test2.ate))
         
@@ -129,7 +129,7 @@ using Test, Statistics, Random
         
         # Test treatment effects are reasonable
         @test length(tes_test3.ate) == 50
-        @test abs(mean(tes_test3.ate) - data_test3.true_effects.ate_mean) < 8.0
+        @test abs(mean(tes_test3.ate) - data_test3.true_effects.ate) < 8.0
         @test !any(isnan.(tes_test3.ate))
         @test !any(isinf.(tes_test3.ate))
         
@@ -167,7 +167,7 @@ using Test, Statistics, Random
         
         # Test treatment effects are reasonable
         @test length(tes_test4.ate) == 50
-        @test abs(mean(tes_test4.ate) - data_test4.true_effects.ate_mean) < 8.0
+        @test abs(mean(tes_test4.ate) - data_test4.true_effects.ate) < 8.0
         @test !any(isnan.(tes_test4.ate))
         @test !any(isinf.(tes_test4.ate))
         
@@ -202,7 +202,7 @@ using Test, Statistics, Random
             results[sampler] = mean(tes.ate)
             
             # Test each sampler gives reasonable results
-            @test abs(results[sampler] - data_comp.true_effects.ate_mean) < 6.0
+            @test abs(results[sampler] - data_comp.true_effects.ate) < 6.0
         end
         
         # Test that all samplers are somewhat consistent with each other
