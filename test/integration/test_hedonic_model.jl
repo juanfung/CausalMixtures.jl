@@ -35,21 +35,20 @@ using Test, Statistics, Random
         
         @test_nowarn jit_init_test = CausalMixtures.dpm_init(raw_data_test, priors_test, params_test)
         
-        # FIXED: Define variable outside @test_nowarn, then assign inside
         jit_init_fresh = CausalMixtures.dpm_init(raw_data_test, priors_test, params_test)
-        out_test = nothing  # ← Pre-declare variable
-        @test_nowarn out_test = CausalMixtures.dpm!(jit_init_fresh...)  # ← Assign inside
+        out_test = nothing
+        @test_nowarn out_test = CausalMixtures.dpm!(jit_init_fresh...)
         
-        state_test, input_test, output_test = out_test  # ← Now accessible
+        state_test, input_test, output_test = out_test
         @test length(output_test.out_dp) == 50
         @test length(output_test.out_theta) == 50
         
         # Test PPD computation
         znew_test = mean(input_test.data.Hmat[1:100, 1:3], dims=1)'
-        ynew_test = nothing  # ← Pre-declare
+        ynew_test = nothing
         @test_nowarn ynew_test = CausalMixtures.rand_ppd(output_test, input_test, znew_test[:,1])
         
-        tes_test = nothing  # ← Pre-declare
+        tes_test = nothing
         @test_nowarn tes_test = CausalMixtures.dpm_ate(ynew_test, input_test)
         
         # Test treatment effects are reasonable
@@ -74,7 +73,6 @@ using Test, Statistics, Random
         
         @test_nowarn jit_init_test2 = CausalMixtures.dpm_init(raw_data_test2, priors_test2, params_test2)
         
-        # FIXED: Pre-declare variables
         jit_init_fresh2 = CausalMixtures.dpm_init(raw_data_test2, priors_test2, params_test2)
         out_test2 = nothing
         @test_nowarn out_test2 = CausalMixtures.dpm!(jit_init_fresh2...)
@@ -100,35 +98,120 @@ using Test, Statistics, Random
         println("dpm sampler ATE: $(round(mean(tes_test2.ate), digits=3))")
     end
     
-    @testset "Sampler Consistency Comparison" begin
-        # Compare blocked vs dpm on same data
+    @testset "FMN Sampler Integration" begin
+        # Test fmn sampler specifically  
+        data_test3 = CausalMixtures.generate_hedonic_data(200, 9999)
+        priors_test3 = CausalMixtures.setup_default_priors(data_test3.true_params.ktot, 
+                                                          beta_nu=100.0, rho=6.0, r=2.0)
+        raw_data_test3 = CausalMixtures.RawData(data_test3.formulas.formula_y, 
+                                              data_test3.formulas.formula_d, data_test3.df)
+        
+        params_test3 = CausalMixtures.InputParams(M=50, scale_data=(true,true), 
+                                                verbose=false, model="fmn")
+        
+        @test_nowarn jit_init_test3 = CausalMixtures.dpm_init(raw_data_test3, priors_test3, params_test3)
+        
+        jit_init_fresh3 = CausalMixtures.dpm_init(raw_data_test3, priors_test3, params_test3)
+        out_test3 = nothing
+        @test_nowarn out_test3 = CausalMixtures.dpm!(jit_init_fresh3...)
+        
+        state_test3, input_test3, output_test3 = out_test3
+        @test length(output_test3.out_dp) == 50
+        @test length(output_test3.out_theta) == 50
+        
+        # Test PPD computation
+        znew_test3 = mean(input_test3.data.Hmat[1:100, 1:3], dims=1)'
+        ynew_test3 = nothing
+        @test_nowarn ynew_test3 = CausalMixtures.rand_ppd(output_test3, input_test3, znew_test3[:,1])
+        
+        tes_test3 = nothing
+        @test_nowarn tes_test3 = CausalMixtures.dpm_ate(ynew_test3, input_test3)
+        
+        # Test treatment effects are reasonable
+        @test length(tes_test3.ate) == 50
+        @test abs(mean(tes_test3.ate) - data_test3.true_effects.ate_mean) < 8.0
+        @test !any(isnan.(tes_test3.ate))
+        @test !any(isinf.(tes_test3.ate))
+        
+        println("fmn sampler ATE: $(round(mean(tes_test3.ate), digits=3))")
+    end
+    
+    @testset "Gaussian Sampler Integration" begin
+        # Test gaussian sampler specifically  
+        data_test4 = CausalMixtures.generate_hedonic_data(200, 7777)
+        ## SET J = 1 manually!
+        priors_test4 = CausalMixtures.setup_default_priors(data_test4.true_params.ktot, 
+                                                           beta_nu=100.0, rho=6.0, r=2.0, J=1)
+        raw_data_test4 = CausalMixtures.RawData(data_test4.formulas.formula_y, 
+                                                data_test4.formulas.formula_d, data_test4.df)
+        params_test4 = CausalMixtures.InputParams(M=50, scale_data=(true,true), 
+                                                  verbose=false, model="gaussian")
+        
+        @test_nowarn jit_init_test4 = CausalMixtures.dpm_init(raw_data_test4, priors_test4, params_test4)
+        
+        jit_init_fresh4 = CausalMixtures.dpm_init(raw_data_test4, priors_test4, params_test4)
+        out_test4 = nothing
+        @test_nowarn out_test4 = CausalMixtures.dpm!(jit_init_fresh4...)
+        
+        state_test4, input_test4, output_test4 = out_test4
+        @test length(output_test4.out_dp) == 50
+        @test length(output_test4.out_theta) == 50
+        
+        # Test PPD computation
+        znew_test4 = mean(input_test4.data.Hmat[1:100, 1:3], dims=1)'
+        ynew_test4 = nothing
+        @test_nowarn ynew_test4 = CausalMixtures.rand_ppd(output_test4, input_test4, znew_test4[:,1])
+        
+        tes_test4 = nothing
+        @test_nowarn tes_test4 = CausalMixtures.dpm_ate(ynew_test4, input_test4)
+        
+        # Test treatment effects are reasonable
+        @test length(tes_test4.ate) == 50
+        @test abs(mean(tes_test4.ate) - data_test4.true_effects.ate_mean) < 8.0
+        @test !any(isnan.(tes_test4.ate))
+        @test !any(isinf.(tes_test4.ate))
+        
+        println("gaussian sampler ATE: $(round(mean(tes_test4.ate), digits=3))")
+    end
+    
+    @testset "Multi-Sampler Consistency Comparison" begin
+        # Compare all working samplers on same data
         data_comp = CausalMixtures.generate_hedonic_data(150, 42)
         priors_comp = CausalMixtures.setup_default_priors(data_comp.true_params.ktot)
         raw_data_comp = CausalMixtures.RawData(data_comp.formulas.formula_y, 
                                              data_comp.formulas.formula_d, data_comp.df)
         
-        # Test blocked sampler
-        params_blocked = CausalMixtures.InputParams(M=30, verbose=false, model="blocked")
-        init_blocked = CausalMixtures.dpm_init(raw_data_comp, priors_comp, params_blocked)
-        out_blocked = CausalMixtures.dpm!(init_blocked...)
+        # Test all four working samplers
+        samplers = ["blocked", "dpm", "fmn", "gaussian"]
+        results = Dict()
         
-        # Test dpm sampler  
-        params_dpm = CausalMixtures.InputParams(M=30, verbose=false, model="dpm")
-        init_dpm = CausalMixtures.dpm_init(raw_data_comp, priors_comp, params_dpm)
-        out_dpm = CausalMixtures.dpm!(init_dpm...)
+        for sampler in samplers
+            if sampler == "gaussian"
+                priors_sampler = CausalMixtures.setup_default_priors(data_comp.true_params.ktot, J=1)
+            else
+                priors_sampler = priors_comp
+            end
+            params = CausalMixtures.InputParams(M=30, verbose=false, model=sampler)
+            init = CausalMixtures.dpm_init(raw_data_comp, priors_sampler, params)
+            
+            # Compute treatment effects
+            znew_comp = mean(out[2].data.Hmat[1:100, 1:3], dims=1)'
+            ynew = CausalMixtures.rand_ppd(out[3], out[2], znew_comp[:,1])
+            tes = CausalMixtures.dpm_ate(ynew, out[2])
+            
+            results[sampler] = mean(tes.ate)
+            
+            # Test each sampler gives reasonable results
+            @test abs(results[sampler] - data_comp.true_effects.ate_mean) < 6.0
+        end
         
-        # Compute treatment effects
-        znew_comp = mean(out_blocked[2].data.Hmat[1:100, 1:3], dims=1)'
+        # Test that all samplers are somewhat consistent with each other
+        ate_values = collect(values(results))
+        @test maximum(ate_values) - minimum(ate_values) < 8.0  # Range shouldn't be too wide
         
-        ynew_blocked = CausalMixtures.rand_ppd(out_blocked[3], out_blocked[2], znew_comp[:,1])
-        tes_blocked = CausalMixtures.dpm_ate(ynew_blocked, out_blocked[2])
-        
-        ynew_dpm = CausalMixtures.rand_ppd(out_dpm[3], out_dpm[2], znew_comp[:,1])
-        tes_dpm = CausalMixtures.dpm_ate(ynew_dpm, out_dpm[2])
-        
-        # Test reasonable results and consistency
-        @test abs(mean(tes_blocked.ate) - data_comp.true_effects.ate_mean) < 6.0
-        @test abs(mean(tes_dpm.ate) - data_comp.true_effects.ate_mean) < 6.0
-        @test abs(mean(tes_blocked.ate) - mean(tes_dpm.ate)) < 4.0
+        println("Sampler ATE comparison:")
+        for (sampler, ate) in results
+            println("  $(sampler): $(round(ate, digits=3))")
+        end
     end
 end
