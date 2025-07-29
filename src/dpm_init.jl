@@ -88,6 +88,8 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     
     ## collect data objects
     input_data = InputData(y=ys, d=d, lower=lower, upper=upper, Hmat=Hmat)
+
+    model = params.model
     
     ## collect all inputs
     if priors.prior_theta.prior_beta.Vinv
@@ -101,6 +103,17 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
                              PriorTheta(PriorBeta(mu=priors.prior_theta.prior_beta.mu, V=inv(V), Vinv=true),
                                         priors.prior_Sigma))
     end
+
+    # ADDED: Auto-fix J=1 for gaussian sampler
+    if model == "gaussian" && priors.prior_dp.J != 1
+        @warn "Gaussian sampler requires J=1 (single component). Automatically setting J=1."
+        # Create new priors with J=1
+        new_prior_dp = PriorDP(alpha=priors.prior_dp.alpha, J=1, 
+                               alpha_shape=priors.prior_dp.alpha_shape, 
+                               alpha_rate=priors.prior_dp.alpha_rate)
+        priors = InputPriors(prior_dp=new_prior_dp, prior_theta=priors.prior_theta)
+    end
+    
     input = GibbsInput(data=input_data, dims=dims, params=params, priors=priors)
     
     ## 2. initialize sampler state
