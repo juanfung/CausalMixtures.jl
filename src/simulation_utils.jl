@@ -93,14 +93,20 @@ function generate_hedonic_data(n::Int, seed::Int;
     
     # Compute total number of parameters
     ktot = length(gamma) + length(beta_1) + length(beta_0)
+
+    potential_outcomes = (
+        Y1 = y_1,           # Treatment outcomes for all units
+        Y0 = y_0           # Control outcomes for all units  
+    )
     
     return (
         df = df,
         true_effects = (
-            ate = ate_true,
-            tt = tt_true, 
-            tut = tut_true,
-            ate_mean = mean(ate_true)
+            potential_outcomes = potential_outcomes,
+            ite = ate_true, # individual treatment effects
+            ate = mean(ate_true), # mean ATE
+            tt = tt_true, # TT
+            tut = tut_true # TUT
         ),
         true_params = (
             gamma = gamma,
