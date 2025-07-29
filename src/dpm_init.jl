@@ -10,9 +10,11 @@ function set_sampler(model::String)
     elseif model == "blocked"
         f = dpm_blocked!
     elseif model == "fmn"
-        f =  dpm_fmn!
+        f = dpm_fmn!
     elseif model == "gaussian"
         f = dpm_gaussian!
+    elseif model == "marginal"
+        f = dpm_marginal!
     else
         throw(DomainError(model, "chosen model does not match known models"))
     end
@@ -42,8 +44,8 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     
     ## 1. transform raw data -> model matrix
     ##    * Optional: scale data    
-    y = convert(Array, data.df[data.y_form.lhs])
-    d = convert(Array, data.df[data.d_form.lhs])
+    y = convert(Array, data.df[!, data.y_form.lhs.sym])
+    d = convert(Array, data.df[!, data.d_form.lhs.sym])
     
     xmat = ModelMatrix( ModelFrame(data.y_form, data.df) ).m
     if verbose println("Xmat dim:\nN = ", size(xmat, 1), ", K = ", size(xmat, 2)) end
@@ -62,7 +64,7 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     ## scale response?
     if scale_data[1]
         if verbose println("Scaling response...") end
-        ys = standardize(y)
+        ys = standardize(Float64.(y))
     else
         ys = ScaleData(a=y)
     end
@@ -86,6 +88,8 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     
     ## collect data objects
     input_data = InputData(y=ys, d=d, lower=lower, upper=upper, Hmat=Hmat)
+
+    model = params.model
     
     ## collect all inputs
     if priors.prior_theta.prior_beta.Vinv
@@ -99,6 +103,17 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
                              PriorTheta(PriorBeta(mu=priors.prior_theta.prior_beta.mu, V=inv(V), Vinv=true),
                                         priors.prior_Sigma))
     end
+
+    # ADDED: Auto-fix J=1 for gaussian sampler
+    if model == "gaussian" && priors.prior_dp.J != 1
+        @warn "Gaussian sampler requires J=1 (single component). Automatically setting J=1."
+        # Create new priors with J=1
+        new_prior_dp = PriorDP(alpha=priors.prior_dp.alpha, J=1, 
+                               alpha_shape=priors.prior_dp.alpha_shape, 
+                               alpha_rate=priors.prior_dp.alpha_rate)
+        priors = InputPriors(prior_dp=new_prior_dp, prior_theta=priors.prior_theta)
+    end
+    
     input = GibbsInput(data=input_data, dims=dims, params=params, priors=priors)
     
     ## 2. initialize sampler state
@@ -197,47 +212,6 @@ function dpm_chain!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=fa
     return (state, input, out)
 end
 
-## dump output to disk and continue chain
-## NB: Assumes fname exists!
-## TODO: Re-write for consistency with chain_dpm.jl
-function dpm_dump!(state::GibbsState, input::GibbsInput, out::GibbsOut;
-                   fname::String="out", dir::String="./")
-    old_m = state.state_sampler.batch_m
-    ##batch_n = state.state_sampler.batch_n
-    ##batch_1 = state.state_sampler.batch_1
-    out_m = state.state_sampler.batch_m
-    out_1 = batch_m - input.params.M + 1
-    if in( fname * ".jld", readdir(dir) ) # fname * ".jld" in readdir(dir) # 
-        ## 1. write current output to disk using JLD-HDF5        
-        if input.params.verbose println("Dumping old output...") end        
-        JLD.jldopen(dir * fname * ".jld", "r+", compress=true) do file
-            delete!(file, "state")
-            write(file, "state", state)
-            write(file, "output/out-$(out_1):$(out_m)", out) # add sims
-        end        
-    else
-        ##error("$(fname) does not exist in $(dir)!")
-        if input.params.verbose println("Creating new file " * dir * fname * ".jld ...") end
-        ## TODO: create and write file, saving state and input
-        JLD.jldopen(dir * fname * ".jld", "w", compress=true) do file
-            addrequire(file, CausalMixtures)
-            write(file, "state", state) # save state 
-            write(file, "input", input) # save inputs
-            g = g_create(file, "output")
-            g["out-$(out_1):$(out_m)"] = out # save first run output
-        end
-    end
-    ## 2. run sampler with empty out
-    out = GibbsOut(input.params.M)
-    gc()
-    state.state_sampler.batch_n += 1
-    state.state_sampler.batch_1 += state.state_sampler.batch_m # increment starting point
-    dpm_sampler = set_sampler(input.params.model)
-    if input.params.verbose println("Continuing from last state...") end
-    state, input, out = dpm_sampler( state, input, out)
-    return (state, input, out)
-end
-
 ## wrapper to call sampler
 function dpm!(state::GibbsState, input::GibbsInput, out::GibbsOut=GibbsOut(0); test=false)
     if ( state.state_sampler.chain && length(out.out_data) > 0 )
@@ -288,6 +262,114 @@ end
 ## 6. write to disk and dump?
 ##
 
+## dump output to disk and continue chain
+## new: JLD2 version
+## TODO: Check for consistency with chain_dpm.jl
+function dpm_dump!(state::GibbsState, input::GibbsInput, out::GibbsOut;
+                   fname::String="out", dir::String="./")
+    old_m = state.state_sampler.batch_m
+    out_m = state.state_sampler.batch_m
+    out_1 = old_m - input.params.M + 1
+    filename = dir * fname * ".jld2"
+    if isfile(filename)
+        ## 1. append to existing file
+        if input.params.verbose println("Updating existing file...") end
+        
+        # Load existing data
+        existing_data = load(filename)
+        
+        # Update state
+        existing_data["state"] = state
+        
+        # Add new output batch
+        batch_key = "out-$(out_1):$(out_m)"
+        existing_data[batch_key] = out
+        
+        # Save updated data
+        save(filename, existing_data)
+        
+    else
+        ## 2. create new file
+        if input.params.verbose println("Creating new file $filename...") end
+        
+        batch_key = "out-$(out_1):$(out_m)"
+        jldsave(filename; 
+                state=state, 
+                input=input, 
+                (Symbol(batch_key))=out)
+    end
+    ## 3. run sampler with empty out
+    out = GibbsOut(input.params.M)
+    gc()
+    state.state_sampler.batch_n += 1
+    state.state_sampler.batch_1 += state.state_sampler.batch_m # increment starting point
+    dpm_sampler = set_sampler(input.params.model)
+    if input.params.verbose println("Continuing from last state...") end
+    state, input, out = dpm_sampler( state, input, out)
+    return (state, input, out)
+end
+
+## new: load saved results from disk
+function dpm_load(fname::String="out", dir::String="./")
+    filename = dir * fname * ".jld2"
+    
+    if !isfile(filename)
+        error("File $filename does not exist!")
+    end
+    
+    data = load(filename)
+    
+    # Extract core objects
+    state = data["state"]
+    input = data["input"]
+    
+    # Find all output batches
+    output_keys = filter(k -> startswith(string(k), "out-"), keys(data))
+    
+    if length(output_keys) == 1
+        # Single batch
+        out = data[first(output_keys)]
+        return (state, input, out)
+    else
+        # Multiple batches - return as dictionary
+        outputs = Dict()
+        for key in output_keys
+            outputs[string(key)] = data[key]
+        end
+        return (state, input, outputs)
+    end
+end
+
+## new: convenience function to load just the final state
+function dpm_load_state(fname::String="out", dir::String="./")
+    filename = dir * fname * ".jld2"
+    
+    if !isfile(filename)
+        error("File $filename does not exist!")
+    end
+    
+    return load(filename, "state")
+end
+
+## new: convenience function to combine multiple output batches
+function dpm_combine_outputs(outputs::Dict)
+    if length(outputs) == 1
+        return first(values(outputs))
+    end
+    
+    # Sort by batch number and combine
+    sorted_keys = sort(collect(keys(outputs)))
+    combined_out = outputs[sorted_keys[1]]
+    
+    for key in sorted_keys[2:end]
+        batch_out = outputs[key]
+        append!(combined_out.out_data, batch_out.out_data)
+        append!(combined_out.out_dp, batch_out.out_dp)
+        append!(combined_out.out_theta, batch_out.out_theta)
+    end
+    
+    return combined_out
+end
 
     
 ## pre-define functions in sampler?

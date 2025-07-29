@@ -56,7 +56,7 @@ mutable struct Theta
     Sigma::Matrix{Float64} # latent data covariance matrix
 end
 
-Theta(; beta=zeros(2), Sigma=eye(2)) = Theta(beta,Sigma)
+Theta(; beta=zeros(2), Sigma=Matrix{Float64}(I, 2, 2)) = Theta(beta,Sigma)
 
 ## collect thetas for all components
 ##type StateTheta

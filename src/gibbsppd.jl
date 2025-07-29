@@ -8,7 +8,7 @@ end
 
 ##TE = TreatmentEffects
 
-TreatmentEffects(; ate=Array(Float64,0), tt=Array(Float64,0) ) = TreatmentEffects(ate, tt)
+TreatmentEffects(; ate=Float64[], tt=Float64[] ) = TreatmentEffects(ate, tt)
 
 mutable struct PosteriorPredictive
     grid::LinRange{Float64}
@@ -17,7 +17,8 @@ mutable struct PosteriorPredictive
     late::Array{Float64}
 end
 
-PosteriorPredictive(;grid=linspace(-2,2,2), ate=zeros(2), tt=zeros(2), late=zeros(2)) = PPD(grid, ate, tt, late)
+PosteriorPredictive(;grid=LinRange(-2,2,2), ate=zeros(2), tt=zeros(2), late=zeros(2)) = PosteriorPredictive(grid, ate, tt, late)
+
 
 PPD = PosteriorPredictive
 

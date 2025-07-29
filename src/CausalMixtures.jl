@@ -51,6 +51,8 @@ include("dpm_init.jl")
 include("dpm_gibbs.jl")
 ## blocked gibbs sampler
 include("dpm_blocked.jl")
+## marginal gibbs sampler
+include("dpm_marginal.jl")
 ## fmn gibbs sampler
 include("dpm_fmn.jl")
 ## benchmark guassian gibbs sampler
@@ -60,5 +62,10 @@ include("dpm_gaussian.jl")
 include("dpm_ppd.jl")
 ## parallelized ppd
 include("parallel_ppd.jl")
+
+## --------------------------------------------------------------------------- #
+## simulation utilities
+include("simulation_utils.jl")
+export generate_hedonic_data, setup_default_priors
 
 end

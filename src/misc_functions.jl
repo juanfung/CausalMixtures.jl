@@ -162,7 +162,7 @@ function ppd_cdf(ppd::PPD; ate=true)
         ## y::Float64 : value at which CDF evaluated
         ## Output:
         ## F(y)::Float64        
-        idx = find(xi -> xi < y, ppd.grid)        
+        idx = findall(xi -> xi < y, ppd.grid)        
         lens = diff(ppd.grid[idx])
         b = sub(a, idx)
         b = [ mean(b[i:i+1]) for i in 1:(length(b)-1) ]        
