@@ -1,0 +1,26 @@
+name = "CausalMixtures"
+uuid = "1f4c2e2c-ba92-44a5-bcbf-8e35866b55a5"
+version = "0.1.0"
+
+[deps]
+CategoricalArrays = "324d7699-5711-5eae-9e2f-1d82baa6b597"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
+StatsModels = "3eaba693-59b7-5ba5-a881-562e759f1c8d"
+
+[compat]
+CategoricalArrays = "0.09, 0.10, 0.11"
+DataFrames = "0.20, 0.21, 0.22, 1"
+DataStructures = "0.17, 0.18"
+Distributions = "0.21, 0.22, 0.23, 0.24, 0.25"
+JLD2 = "0.1, 0.2, 0.3, 0.4"
+StatsBase = "0.32, 0.33"
+StatsModels = "0.6"
+julia = "1.0"
