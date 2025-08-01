@@ -293,10 +293,12 @@ function dpm_dump!(state::GibbsState, input::GibbsInput, out::GibbsOut;
         if input.params.verbose println("Creating new file $filename...") end
         
         batch_key = "out-$(out_1):$(out_m)"
-        jldsave(filename; 
-                state=state, 
-                input=input, 
-                (Symbol(batch_key))=out)
+        save_data = Dict(
+            "state" => state,
+            "input" => input,
+            batch_key => out
+        )
+        save(filename, save_data)
     end
     ## 3. run sampler with empty out
     out = GibbsOut(input.params.M)
