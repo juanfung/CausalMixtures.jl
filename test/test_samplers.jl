@@ -1,6 +1,7 @@
 # test/test_samplers.jl - Test individual sampler functions
 using Test
 using CausalMixtures
+using Statistics
 
 # Create test data
 data_test = CausalMixtures.generate_hedonic_data(200, 1111)

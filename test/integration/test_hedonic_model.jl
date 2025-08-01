@@ -193,6 +193,7 @@ using Test, Statistics, Random
             end
             params = CausalMixtures.InputParams(M=30, verbose=false, model=sampler)
             init = CausalMixtures.dpm_init(raw_data_comp, priors_sampler, params)
+            out = CausalMixtures.dpm!(init...)
             
             # Compute treatment effects
             znew_comp = mean(out[2].data.Hmat[1:100, 1:3], dims=1)'
