@@ -1,6 +1,11 @@
 # CausalMixtures.jl
 
-Bayesian nonparametric causal inference using Dirichlet Process Mixtures.
+Bayesian nonparametric causal inference using Dirichlet Process Mixtures,
+inspired by:
+
+Li, M., Poirier, D.J. and Tobias, J.L. (2004), Do dropouts suffer from dropping
+out? Estimation and prediction of outcome gains in generalized selection models.
+J. Appl. Econ., 19: 203-225. https://doi.org/10.1002/jae.731
 
 ## Quick Reference - Working Workflow
 
@@ -80,32 +85,14 @@ println("95% CI: $(round.(quantile(tes.ate, [0.025, 0.975]), digits=3))")
 |---------|--------|-------------|
 | `"blocked"` | ✅ **Reliable** | Default choice, stable |
 | `"dpm"` | ✅ **Reliable** | More flexible, research use |
-| `"marginal"` | ❌ **Unstable** | Avoid until Julia 1.6+ |
-
-## Common Issues & Solutions
-
-**Wrong ATE sign/magnitude:**
-- Check treatment coding (1=treated, 0=control)
-- Verify formula specifications
-- Try different sampler
-
-**High variance in results:**
-- Increase MCMC iterations (`M`)
-- Check for convergence issues
-- Consider different priors
-
-**Sampler errors:**
-- Use `"blocked"` instead of `"marginal"`
-- Check data format (no missing values)
-- Verify ktot matches model parameters
+| `"marginal"` | ❌ **Unstable** | WIP (to be fixed in julia 1.10 migrate) |
 
 ## Testing
 
 ```julia
-# Run integration tests
-include("test/integration/test_hedonic_model.jl")
+# Run all tests
+include("test/runtests.jl")
 
-# Should see: "32 tests passed"
 ```
 
 ## File Structure
@@ -143,11 +130,8 @@ include("test/integration/test_hedonic_model.jl")
     └── testgibbsstate.jl
 ```
 
-## Notes for Future Me
+## Notes
 
 - **Always use `"blocked"` sampler** unless you need `"dpm"` flexibility
-- **The marginal sampler is fundamentally broken** - gives different results with same inputs
-- **Integration tests prove blocked/dpm work reliably** 
 - **ktot = length of parameter vector** (gamma + beta_1 + beta_0)
 - **PPD matrix is (3 × M)**: [selection, treated outcome, control outcome]
-=======
