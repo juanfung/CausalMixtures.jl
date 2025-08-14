@@ -1,6 +1,11 @@
 # CausalMixtures.jl
 
-Bayesian nonparametric causal inference using Dirichlet Process Mixtures.
+Bayesian nonparametric causal inference using Dirichlet Process Mixtures,
+inspired by:
+
+Li, M., Poirier, D.J. and Tobias, J.L. (2004), Do dropouts suffer from dropping
+out? Estimation and prediction of outcome gains in generalized selection models.
+J. Appl. Econ., 19: 203-225. https://doi.org/10.1002/jae.731
 
 ## Quick Reference - Working Workflow
 
