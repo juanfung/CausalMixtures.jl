@@ -95,6 +95,7 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     if priors.prior_theta.prior_beta.Vinv
         ## convert to covariance
         V = inv(priors.prior_theta.prior_beta.V)
+        #V = \(priors.prior_theta.prior_beta.V, I(ktot))
     else
         ## save covariance and convert to precision
         V = priors.prior_theta.prior_beta.V
