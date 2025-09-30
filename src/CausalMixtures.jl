@@ -8,7 +8,8 @@ module CausalMixtures
 using DataFrames, DataStructures, Distributions, LinearAlgebra, Random, SparseArrays, StatsBase, StatsModels
 using JLD2, Printf
 ## using Rebugger
-import Base.+, Base.-, Base.*, Base.Iterators.take
+import Base: +, -, *
+import Base.Iterators: take
 
 export DataFrames, Distributions, LinearAlgebra, StatsBase, StatsModels, Random, JLD2
 
