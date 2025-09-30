@@ -87,23 +87,57 @@ function sample_new_Sigma(p::PriorTheta, Hi::SparseMatrixCSC{Float64,Int64}, yi:
     return Sigma_j
 end
 
-function new_beta_cov(p::PriorTheta, Hi::SparseMatrixCSC{Float64,Int64}, yi::Vector{Float64}, S::Matrix{Float64})
-    #Hi_dense = Matrix(Hi) # 3 x ktot
-    #xb = Hi_dense' * inv(S) # ktot x 3
-    ##xb = Hi' \ cholesky(S) # ktot x 3
-    #vj = xb * Hi_dense + p.prior_beta.V # ktot x ktot
-    ##vj_inv = cholesky(vj) \ Matrix{Float64}(I, size(vj)...)
-    #vj_inv = inv(vj)
-    ## ORIGINAL ##
-    xb = *(Hi', inv(S)) # ktot x 3
-    vj = xb*Hi + p.prior_beta.V # ktot x ktot
-    return ( xb, inv(vj) )
+function diagnose_matrix_issues(S::Matrix{Float64}, name::String)
+    cond_num = cond(S)
+    min_eig = minimum(eigvals(S))
+
+    # Check for numerical issues even if technically positive definite
+    if cond_num > 1e12 || min_eig < 1e-12
+        println("Matrix $name has numerical issues:")
+        println("  - Size: $(size(S))")
+        println("  - Condition number: $cond_num")
+        println("  - Minimum eigenvalue: $min_eig")
+        println("  - Is symmetric: $(issymmetric(S))")
+        println("  - Is positive definite: $(isposdef(S))")
+        println()
+    end
 end
 
-function sample_new_beta(xb::Matrix{Float64}, vj::Matrix{Float64}, Vmu::Vector{Float64}, yi::Vector{Float64})
-    mj = *( vj, xb*yi + Vmu ) # ktot x 1 
-    return mj + cholesky( Hermitian(vj) ).U'*randn(length(mj)) # ktot x 1
+function new_beta_cov(p::PriorTheta, Hi::SparseMatrixCSC{Float64,Int64}, yi::Vector{Float64}, S::Matrix{Float64})
+    S_sym = Hermitian(S)
+
+    try
+        L_S = cholesky(S_sym)
+        xb = Matrix(Hi' / L_S.U)  # Convert to dense Matrix
+        precision = xb * Hi + p.prior_beta.V
+        L_prec = cholesky(Hermitian(precision))
+
+        return (xb, L_prec)  # Both are now correct types
+
+    catch PosDefException
+        @debug "Cholesky failed, falling back to inv()"
+        xb = Matrix(Hi' * inv(S))  # Convert to dense Matrix
+        vj = xb*Hi + p.prior_beta.V
+        return (xb, inv(vj))  # Both are now correct types
+    end
 end
+
+
+function sample_new_beta(xb::Matrix{Float64}, vj_or_chol::Union{Matrix{Float64}, Cholesky}, Vmu::Vector{Float64}, yi::Vector{Float64})
+    if isa(vj_or_chol, Cholesky)
+        # New path: precision Cholesky
+        L_prec = vj_or_chol
+        rhs = xb*yi + Vmu
+        mj = L_prec \ rhs
+        return mj + L_prec.U' \ randn(length(mj))
+    else
+        # Old path: covariance matrix (fallback)
+        vj = vj_or_chol
+        mj = vj * (xb*yi + Vmu)
+        return mj + cholesky(Hermitian(vj)).U' * randn(length(mj))
+    end
+end
+
 
 ## compute probability of theta
 function prob_theta(theta::Theta, Hi::SparseMatrixCSC{Float64,Int64}, yi::Vector{Float64})
