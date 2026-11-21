@@ -258,4 +258,29 @@ end
     end
 end
 
+@testset "Odds and ends: pre-1.0 helpers (check_y, batch_var, dpm_dump!)" begin
+    data = generate_hedonic_data(50, 11)
+    raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
+    seed_global!()
+    params = CausalMixtures.InputParams(M=4, scale_data=(true, true), verbose=false, model="blocked")
+    state, input, out = CausalMixtures.dpm!(CausalMixtures.dpm_init(raw, setup_default_priors(7, J=3), params)...)
+    ## the observed outcome is never imputed, so check_y recovers it on the original scale
+    @test CausalMixtures.check_y(input, out) ≈ data.df.Y_obs
+
+    a = collect(1.0:12.0)
+    @test CausalMixtures.batch_var(a, 3) ≈ var([2.0, 5.0, 8.0, 11.0]) / 4
+    @test_throws ArgumentError CausalMixtures.batch_var(a, 5)
+
+    ## dpm_dump! (used gc()) writes the batch to disk and continues the chain
+    mktempdir() do dir
+        state2, input2, out2 = CausalMixtures.dpm_dump!(state, input, out; fname="chain", dir=dir * "/")
+        @test isfile(joinpath(dir, "chain.jld2"))
+        @test length(out2.out_dp) == params.M
+    end
+
+    @test !isdefined(CausalMixtures, :make_table)
+    @test !isdefined(CausalMixtures, :ppd_cdf)
+    @test !isdefined(CausalMixtures, :rescale_output)
+end
+
 end # Phase 1 fixes

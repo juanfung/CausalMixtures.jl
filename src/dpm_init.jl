@@ -316,7 +316,7 @@ function dpm_dump!(state::GibbsState, input::GibbsInput, out::GibbsOut;
     end
     ## 3. run sampler with empty out
     out = GibbsOut(input.params.M)
-    gc()
+    GC.gc()
     state.state_sampler.batch_n += 1
     state.state_sampler.batch_1 += state.state_sampler.batch_m # increment starting point
     dpm_sampler = set_sampler(input.params.model)

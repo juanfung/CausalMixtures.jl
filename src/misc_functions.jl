@@ -1,7 +1,6 @@
 ## misc functions
 export flip_mat, NobileWishart, truncnorm, standardize #
-export rescale_beta, rescale_output, check_y, rand_cdf, acf_var, acf_var2, batch_var, ppd_cdf # processing output
-export make_table
+export rescale_beta, check_y, rand_cdf, acf_var, acf_var2, batch_var # processing output
 
 ## --------------------------------------------------------------------------- #
 ## helper functions
@@ -133,59 +132,14 @@ end
 ## post-processing output
 
 
-## rescale MCMC output
-function rescale_output(out::GibbsOut)
-    rescaled_out = GibbsOut(out_data=out.out_data, out_dp=out.out_dp, out_theta=out.out_theta)
-    for m in 1:length(out.out_theta)
-        for j in 1:length(rescaled_out.out_theta[m])
-            rescaled_out.out_theta[m][j].beta = rescale_beta(rescaled_out.out_theta[m][j].beta)
-        end
-    end    
-    return rescaled_out
-end
-
-
 ## check data augmentation
 function check_y(input::GibbsInput, out::GibbsOut)
     my, sy = input.data.y.m[1], input.data.y.s[1]
     y_out = Array{Float64}(undef, input.dims.n, length(out.out_data) )
     for m in 1:length(out.out_data)
-        y_out[:,m] = input.data.d .* out.out_data[m].y1 + (1 - input.data.d) .* out.out_data[m].y0
+        y_out[:,m] = input.data.d .* out.out_data[m].y1 .+ (1 .- input.data.d) .* out.out_data[m].y0
     end
-    return mean( y_out, 2)*sy + my
-end
-
-
-## evaluate CDF at y, F(y) = Pr(Y<y), by integrating PPD
-function ppd_cdf(ppd::PPD; ate=true)
-    
-    ## inputs:
-    ## ppd::PPD : such that sums=true
-    ## ate::Bool : if true, CDF for ATE, else CDF for TT
-    
-    ## output:
-    ## cdf::Function
-
-    if ate
-        a = ppd.ate
-    else
-        a = ppd.tt
-    end    
-    
-    function cdf(y::Float64)        
-        ## Input:        
-        ## y::Float64 : value at which CDF evaluated
-        ## Output:
-        ## F(y)::Float64        
-        idx = findall(xi -> xi < y, ppd.grid)        
-        lens = diff(ppd.grid[idx])
-        b = sub(a, idx)
-        b = [ mean(b[i:i+1]) for i in 1:(length(b)-1) ]        
-        return dot(lens, b)        
-    end
-    
-    return cdf
-    
+    return vec(mean(y_out, dims=2)) .* sy .+ my
 end
 
 
@@ -218,65 +172,9 @@ function batch_var(a::Vector{Float64}, k::Int64)
     ## vb::Float64 : batch variance
     
     M = length(a)
-    if mod(M, k) != 0
-        return println("Warning:\nk must be a multiple of M")
-    else
-        n = div(M, k)
-        a = reshape(a, k, n)
-        batches = mean(a, 1)
-        return var(batches)/n
-    end
+    mod(M, k) == 0 || throw(ArgumentError("the batch size k = $k must divide M = $M"))
+    n = div(M, k)
+    batches = vec(mean(reshape(a, k, n), dims=1))
+    return var(batches)/n
     
-end
-
-## --------------------------------------------------------------------------- #
-## function to make tables
-##function make_table(t::TreatmentEffects; expo::Bool=false, ...)
-function make_table(a::Vector, b::Vector; tab_name::String="tab", tab_path::String=pwd(),
-                    y::Float64=0.0, output::Bool=true)
-    
-    ## Input:
-    ## a,b : ate, tt
-    
-    ## Output:
-    ## a table
-
-    tab = DataFrames.DataFrame()
-    aCDF = StatsBase.ecdf(a)
-    bCDF = StatsBase.ecdf(b)
-
-    tab[:stat] = ["mean",
-                   "median",
-                   "variance",
-                   "95pct credible set (lower)",
-                   "95pct credible set (upper)",
-                   "F($(y))" ]
-
-    tab[:ate] = round([
-                        mean(a),
-                        median(a),
-                        DPMixture.acf_var(a),
-                        StatsBase.percentile(a, 2.5),
-                        StatsBase.percentile(a, 97.5),
-                        aCDF(y) ], 6)
-
-    tab[:tt] = round([
-                       mean(b),
-                       median(b),
-                       DPMixture.acf_var(b),
-                       StatsBase.percentile(b, 2.5),
-                       StatsBase.percentile(b, 97.5),
-                       bCDF(y) ], 6)
-
-    DataFrames.writetable(joinpath(tab_path, tab_name * ".dat"),
-                          tab,
-                          separator = ';',
-                          quotemark = ' ',
-                          header = true)
-
-    println("Table " * tab_name * ": done!")
-
-    if output
-        return tab, aCDF, bCDF
-    end
 end
