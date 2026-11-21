@@ -10,10 +10,7 @@ function dpm_ppd(out::GibbsOut, znew::Vector{Float64}, prior_theta::PriorTheta;
     rho = prior_theta.prior_Sigma.rho
     rhoR = prior_theta.prior_Sigma.rho*prior_theta.prior_Sigma.R
     mu = prior_theta.prior_beta.mu
-    if prior_theta.prior_beta.Vinv
-        ## convert precision to covariance
-        V = inv(prior_theta.prior_beta.V)
-    end
+    Lcov = prior_theta.prior_beta.Lcov # factor of the prior covariance V0, whatever Vinv is
     
     ## predictors
     hnew = blockdiag(sparse(znew'), sparse(znew[xid]'), sparse(znew[xid]')) # 3 x ktot
@@ -38,7 +35,7 @@ function dpm_ppd(out::GibbsOut, znew::Vector{Float64}, prior_theta::PriorTheta;
         
         ## draw from prior
         Sigma = NobileWishart(rho, rhoR)
-        beta = mu + cholesky(V).U'*randn(length(mu))
+        beta = mu + Lcov*randn(length(mu))
         hb = hnew*beta
         append!( ynew, hb + cholesky(Sigma).U'*randn(3) )
         push!( w, alpha )
@@ -64,10 +61,7 @@ function rand_dpm(out::GibbsOut, p::PriorTheta, hnew::SparseMatrixCSC{Float64,In
     rho = p.prior_Sigma.rho
     rhoR = rho*p.prior_Sigma.R
     mu = p.prior_beta.mu
-    if p.prior_beta.Vinv
-        ## convert precision to covariance
-        V = inv(p.prior_beta.V)
-    end
+    Lcov = p.prior_beta.Lcov # factor of the prior covariance V0, whatever Vinv is
     ## pre-allocate storage
     ynew_out = Array{Float64}(undef, 0)
     ynew = Array{Float64}(undef, 0)
@@ -86,7 +80,7 @@ function rand_dpm(out::GibbsOut, p::PriorTheta, hnew::SparseMatrixCSC{Float64,In
         end 
         ## draw from prior
         Sigma = NobileWishart(rho, rhoR)
-        beta = mu + cholesky(V).U'*randn(length(mu))
+        beta = mu + Lcov*randn(length(mu))
         hb = hnew*beta
         append!( ynew, hb + cholesky(Sigma).U'*randn(3) )
         push!( w, alpha )

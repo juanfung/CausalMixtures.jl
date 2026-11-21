@@ -283,4 +283,25 @@ end
     @test !isdefined(CausalMixtures, :rescale_output)
 end
 
+@testset "Odds and ends: PPD prior draws work when Vinv = false" begin
+    data = generate_hedonic_data(60, 5)
+    raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
+    seed_global!()
+    params = CausalMixtures.InputParams(M=6, verbose=false, model="dpm")
+    state, input, out = CausalMixtures.dpm!(CausalMixtures.dpm_init(raw, setup_default_priors(7, J=3), params)...)
+    V0 = Matrix(Diagonal(collect(1.0:7.0)))
+    sig = input.priors.prior_theta.prior_Sigma
+    pt_cov = CausalMixtures.PriorTheta(CausalMixtures.PriorBeta(mu=zeros(7), V=V0, Vinv=false), sig)
+    pt_prec = CausalMixtures.PriorTheta(CausalMixtures.PriorBeta(mu=zeros(7), V=inv(V0), Vinv=true), sig)
+    hnew = CausalMixtures.ppd_design(input, mean_covariates(input)...)
+    seed_global!(3); a = CausalMixtures.rand_dpm(out, pt_cov, hnew)
+    seed_global!(3); b = CausalMixtures.rand_dpm(out, pt_prec, hnew)
+    @test size(a) == (3, params.M)
+    @test a ≈ b
+    znew = mean_covariates(input)[2]
+    seed_global!(3); c = CausalMixtures.dpm_ppd(out, znew, pt_cov)
+    seed_global!(3); d = CausalMixtures.dpm_ppd(out, znew, pt_prec)
+    @test c ≈ d
+end
+
 end # Phase 1 fixes
