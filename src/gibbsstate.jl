@@ -15,7 +15,7 @@ BlockedWeights(; w=1.0, v=1.0) = BlockedWeights(w, v)
 +(b1::BlockedWeights, b2::BlockedWeights) = BlockedWeights(b1.w+b2.w, b1.v+b2.v)
 
 -(a::Real, b::BlockedWeights) = BlockedWeights(a-b.w, a-b.v)
--(b1::BlockedWeights, b2::BlockedWeights) = BlockedWeights(b1.w+b2.w, b1.v+b2.v)
+-(b1::BlockedWeights, b2::BlockedWeights) = BlockedWeights(b1.w-b2.w, b1.v-b2.v)
 
 *(a::Real, b::BlockedWeights) = BlockedWeights(a*b.w, a*b.v)
 *(b1::BlockedWeights, b2::BlockedWeights) = BlockedWeights(b1.w*b2.w, b1.v*b2.v)

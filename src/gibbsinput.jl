@@ -120,6 +120,6 @@ GibbsInput(; data=InputData(), dims=InputDims(), params=InputParams(), priors=In
     GibbsInput(data, dims, params, priors)
 
 ## --------------------------------------------------------------------------- #
-export RawRata, ScaleData, InputData, InputPriors, InputParams, InputDims
+export RawData, ScaleData, InputData, InputPriors, InputParams, InputDims
 export PriorDP, PriorBeta, PriorSigma, PriorTheta
 export GibbsInput

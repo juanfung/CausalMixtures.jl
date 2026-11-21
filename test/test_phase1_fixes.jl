@@ -233,4 +233,12 @@ end
     @test_throws DimensionMismatch CausalMixtures.ppd_design(in_w, [1.0], [1.0, 0.5])
 end
 
+@testset "Odds and ends: BlockedWeights minus, RawData export" begin
+    b1, b2 = CausalMixtures.BlockedWeights(0.5, 0.25), CausalMixtures.BlockedWeights(0.125, 0.5)
+    @test (b1 - b2).w == 0.375 && (b1 - b2).v == -0.25
+    @test (b1 + b2).w == 0.625 && (b1 + b2).v == 0.75
+    @test :RawData in names(CausalMixtures)
+    @test !(:RawRata in names(CausalMixtures))
+end
+
 end # Phase 1 fixes
