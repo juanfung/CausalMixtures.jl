@@ -306,8 +306,8 @@ function update_alpha!(state::GibbsState, input::GibbsInput)
     b_star = input.priors.prior_dp.alpha_rate - log(state.state_dp.eta)
     a_star = input.priors.prior_dp.alpha_shape + state.state_dp.J
     A = (input.priors.prior_dp.alpha_shape + state.state_dp.J - 1) / (input.dims.n * b_star)
-    ##pi_eta = A/(1 + A)
-    a_star = A/(1 + A) > 0.5 ? a_star : a_star - 1
+    ## Escobar & West (1995): shape a+k with probability pi_eta = A/(1+A), else a+k-1
+    a_star = rand() < A/(1 + A) ? a_star : a_star - 1
     
     ## sample alpha
     state.state_dp.alpha = rand( Distributions.Gamma(a_star, 1/b_star) )
@@ -707,7 +707,8 @@ function update_marginal_alpha!(state::GibbsState, input::GibbsInput)
     b_star = input.priors.prior_dp.alpha_rate - log(state.state_dp.eta)
     a_star = input.priors.prior_dp.alpha_shape + state.state_dp.J
     A = (input.priors.prior_dp.alpha_shape + state.state_dp.J - 1) / (input.dims.n * b_star)
-    a_star = A/(1 + A) > 0.5 ? a_star : a_star - 1
+    ## Escobar & West (1995): shape a+k with probability pi_eta = A/(1+A), else a+k-1
+    a_star = rand() < A/(1 + A) ? a_star : a_star - 1
     
     ## sample alpha
     state.state_dp.alpha = rand(Distributions.Gamma(a_star, 1/b_star))

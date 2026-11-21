@@ -10,7 +10,7 @@ module TestHelpers
 
 using Random, Statistics, LinearAlgebra
 
-export TEST_SEED, test_rng, seed_global!,
+export TEST_SEED, test_rng, seed_global!, ess_batch,
        mean_zscores, cov_zscores, means_match, covs_match, moments_match
 
 "Default seed for statistical tests."
@@ -26,6 +26,18 @@ Seed the task-local global RNG, for code that does not take an `rng` argument ye
 (the samplers before Phase 3).
 """
 seed_global!(seed::Integer=TEST_SEED) = Random.seed!(seed)
+
+"""
+    ess_batch(x; nbatches=50) -> Float64
+
+Effective sample size of a scalar MCMC trace by non-overlapping batch means:
+var(x) divided by the batch-means estimate of the variance of the mean.
+"""
+function ess_batch(x::AbstractVector; nbatches::Integer=50)
+    bs = div(length(x), nbatches)
+    bm = [mean(view(x, (b-1)*bs+1:b*bs)) for b in 1:nbatches]
+    return var(x) / (var(bm) / nbatches)
+end
 
 _rows(x::AbstractVector) = reshape(x, :, 1)
 _rows(x::AbstractMatrix) = x
