@@ -60,8 +60,6 @@ include("dpm_gaussian.jl")
 
 ## posterior predictives
 include("dpm_ppd.jl")
-## parallelized ppd
-include("parallel_ppd.jl")
 
 ## --------------------------------------------------------------------------- #
 ## simulation utilities

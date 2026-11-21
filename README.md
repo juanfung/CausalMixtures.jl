@@ -85,7 +85,7 @@ println("95% CI: $(round.(quantile(tes.ate, [0.025, 0.975]), digits=3))")
 |---------|--------|-------------|
 | `"blocked"` | ✅ **Reliable** | Default choice, stable |
 | `"dpm"` | ✅ **Reliable** | More flexible, research use |
-| `"marginal"` | ❌ **Unstable** | WIP (to be fixed in julia 1.10 migrate) |
+| `"marginal"` | ⚠️ **Deprecated** | Do not use; to be replaced by the Design A sampler (`docs/implementation_plan.md`) |
 
 ## Testing
 
@@ -115,7 +115,6 @@ include("test/runtests.jl")
 │   ├── gibbsppd.jl
 │   ├── gibbsstate.jl
 │   ├── misc_functions.jl
-│   ├── parallel_ppd.jl
 │   ├── sampler_functions.jl.   # MCMC sampler helper functions (blocked, dpm work; marginal broken)
 │   └── simulation_utils.jl     # generate_hedonic_data(), setup_default_priors()
 └── test

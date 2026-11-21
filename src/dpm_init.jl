@@ -93,6 +93,11 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
                            xnames=string.(coefnames(xframe)), znames=string.(coefnames(zframe)))
 
     model = params.model
+    if model == "marginal"
+        @warn "model = \"marginal\" is deprecated: its new-component step is biased and its PPD and " *
+              "alpha update do not match the model it runs. It will be replaced by the Design A sampler " *
+              "(docs/implementation_plan.md). Use \"blocked\" or \"dpm\" meanwhile."
+    end
     
     ## collect all inputs
     ## prior_beta.V is the precision from here on; prior_beta.Vcov and .Lcov hold the covariance V0

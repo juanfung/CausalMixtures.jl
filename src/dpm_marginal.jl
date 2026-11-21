@@ -1,4 +1,5 @@
 ## marginal sampler for DPM
+## DEPRECATED: see the warning in dpm_init and docs/implementation_plan.md (Design A replaces it)
 export dpm_marginal!
 
 function dpm_marginal!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=false)

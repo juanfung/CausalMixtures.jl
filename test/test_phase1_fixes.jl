@@ -304,4 +304,15 @@ end
     @test c ≈ d
 end
 
+@testset "Odds and ends: parallel_ppd retired, marginal deprecated" begin
+    @test !isdefined(CausalMixtures, :parallel_ppd)
+    @test !isdefined(CausalMixtures, :single_dpm_ppd)
+    data = generate_hedonic_data(40, 8)
+    raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
+    priors = setup_default_priors(7, J=3)
+    @test_logs (:warn, r"deprecated") CausalMixtures.dpm_init(raw, priors,
+        CausalMixtures.InputParams(M=1, verbose=false, model="marginal"))
+    @test_logs CausalMixtures.dpm_init(raw, priors, CausalMixtures.InputParams(M=1, verbose=false, model="blocked"))
+end
+
 end # Phase 1 fixes
