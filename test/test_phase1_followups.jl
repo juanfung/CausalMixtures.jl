@@ -66,4 +66,27 @@ end
     ## far outside the tolerance above
 end
 
+@testset "blocked alpha update survives a stick-breaking draw of v = 1" begin
+    ## one component holds every unit and alpha is tiny: Beta(1 + 500, alpha + 0) rounds to 1.0,
+    ## which made log(1 - v) = -Inf and Gamma(shape, 1/Inf) throw a DomainError
+    J = 20
+    njs = Dict(j => (j == 1 ? 500 : 0) for j in 1:J)
+    dp = CausalMixtures.StateDP(J=J, labels=Dict(i => 1 for i in 1:500), njs=njs,
+            ws=CausalMixtures.DataStructures.OrderedDict(j => CausalMixtures.BlockedWeights() for j in 1:J),
+            alpha=1e-3, eta=0.0)
+    input = CausalMixtures.GibbsInput(dims=CausalMixtures.InputDims(n=500),
+            priors=CausalMixtures.InputPriors(prior_dp=CausalMixtures.PriorDP(J=J, alpha=1.0,
+                                              alpha_shape=2.0, alpha_rate=2.0)))
+    st = CausalMixtures.GibbsState(state_dp=dp)
+    seed_global!()
+    for _ in 1:200
+        st.state_dp.alpha = 1e-3
+        CausalMixtures.compute_weights!(st.state_dp)
+        @test st.state_dp.ws[1].v < 1.0
+        CausalMixtures.update_blocked_alpha!(st, input)
+        @test isfinite(st.state_dp.alpha) && st.state_dp.alpha > 0
+    end
+    @test sum(w.w for w in values(st.state_dp.ws)) ≈ 1
+end
+
 end # Phase 1 follow-ups

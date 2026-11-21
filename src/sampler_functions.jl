@@ -407,6 +407,9 @@ function compute_v(s::StateDP, j::Int64)
     if j < length(s.njs)
         njj = sum( values( filter( k -> k.first > j, s.njs) ) )
         v = rand( Distributions.Beta( 1 + s.njs[j], s.alpha + njj))
+        ## a Beta draw can round to exactly 1.0 when alpha + njj is tiny; keep 1 - v > 0 so that
+        ## log(1 - v) in update_blocked_alpha! stays finite (-36.7 at the cap)
+        v = min(v, prevfloat(1.0))
     else
         v = 1.0
     end
