@@ -24,6 +24,7 @@ result = @testset "CausalMixtures.jl Tests" begin
 
     # Phase 1 correctness fixes
     include("test_phase1_fixes.jl")
+    include("test_phase1_followups.jl")
 
     # ... include other test files as needed
     

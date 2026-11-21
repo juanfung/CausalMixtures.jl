@@ -2,56 +2,16 @@
 export dpm_ppd, rand_ppd, rand_dpm, rand_blocked, rand_gaussian, dpm_ate, ppd_design, mean_covariates
 
 ## --------------------------------------------------------------------------- #
-## TODO: dpm_ppd computes posterior predictive density values
-function dpm_ppd(out::GibbsOut, znew::Vector{Float64}, prior_theta::PriorTheta;
-                 ##hnew::SparseMatrixCSC{Float64,Int64}
-                 xid::UnitRange=1:(length(znew)-1))
-    
-    rho = prior_theta.prior_Sigma.rho
-    rhoR = prior_theta.prior_Sigma.rho*prior_theta.prior_Sigma.R
-    mu = prior_theta.prior_beta.mu
-    Lcov = prior_theta.prior_beta.Lcov # factor of the prior covariance V0, whatever Vinv is
-    
-    ## predictors
-    hnew = blockdiag(sparse(znew'), sparse(znew[xid]'), sparse(znew[xid]')) # 3 x ktot
-    
-    ## pre-allocate storage
-    ynew_out = Array{Float64}(undef, 0)
-    ynew = Array{Float64}(undef, 0)
-    w = Array{Float64}(undef, 0)
-    
-    for m in 1:length(out.out_dp)
-        
-        alpha = out.out_dp[m].alpha
-        J = out.out_dp[m].J
-        njs = out.out_dp[m].njs
-        theta = out.out_theta[m]
-        
-        for j in 1:J
-            hb = hnew*theta[j].beta
-            append!( ynew, hb + cholesky(theta[j].Sigma).U'*randn(3) )
-            push!( w, njs[j] )
-        end
-        
-        ## draw from prior
-        Sigma = NobileWishart(rho, rhoR)
-        beta = mu + Lcov*randn(length(mu))
-        hb = hnew*beta
-        append!( ynew, hb + cholesky(Sigma).U'*randn(3) )
-        push!( w, alpha )
-        
-        jm = rand( Distributions.Categorical(w/sum(w)) )
-        append!( ynew_out, ynew[(3*(jm-1)+1):3*jm] )
-        
-        ## reset storage
-        resize!(ynew, 0)
-        resize!(w, 0)
-        
-    end
-    
-    return reshape(ynew_out, 3, length(out.out_dp))
-    
-end
+## dpm_ppd: posterior predictive draws for the Polya-urn (dpm) output at a new unit.
+## The design is built by column name (ppd_design), as in rand_ppd; the draws come from rand_dpm.
+## prior_theta defaults to the one the sampler used.
+dpm_ppd(out::GibbsOut, input::GibbsInput, znew::AbstractVector{<:Real};
+        prior_theta::PriorTheta=input.priors.prior_theta) =
+    rand_dpm(out, prior_theta, ppd_design(input, znew))
+
+dpm_ppd(out::GibbsOut, input::GibbsInput, xnew::AbstractVector{<:Real}, wnew::AbstractVector{<:Real};
+        prior_theta::PriorTheta=input.priors.prior_theta) =
+    rand_dpm(out, prior_theta, ppd_design(input, xnew, wnew))
 
 ## --------------------------------------------------------------------------- #
 ## sample latent data from posterior

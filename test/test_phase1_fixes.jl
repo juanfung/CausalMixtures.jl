@@ -299,8 +299,8 @@ end
     @test size(a) == (3, params.M)
     @test a ≈ b
     znew = mean_covariates(input)[2]
-    seed_global!(3); c = CausalMixtures.dpm_ppd(out, znew, pt_cov)
-    seed_global!(3); d = CausalMixtures.dpm_ppd(out, znew, pt_prec)
+    seed_global!(3); c = CausalMixtures.dpm_ppd(out, input, znew; prior_theta=pt_cov)
+    seed_global!(3); d = CausalMixtures.dpm_ppd(out, input, znew; prior_theta=pt_prec)
     @test c ≈ d
 end
 
