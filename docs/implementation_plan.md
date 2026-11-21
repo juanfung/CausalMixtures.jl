@@ -1,6 +1,6 @@
 # CausalMixtures Implementation Plan
 
-*CausalMixtures.jl · implementation plan · v1 · Nov 2026*
+*CausalMixtures.jl · implementation plan · v2 · updated Nov 21, 2026*
 
 > Copied from the claude.ai artifact <https://claude.ai/artifact/D95pcHqUCeSUAyH7pPzbkG>.
 > The companion math review is <https://claude.ai/artifact/3koW6iaGsEvZiLYDH4RH8b>
@@ -9,6 +9,16 @@
 A phase-by-phase plan for rebuilding the samplers. It is written so that a coding session can
 follow it without the earlier conversation. The math and the reasoning behind each choice are on
 the companion review page.
+
+## ✓ Progress
+
+| Phase | Status |
+|---|---|
+| 0 · Baseline | ✅ Done |
+| 1 · Local fixes | ✅ Done, plus follow-ups (`dpm_ppd` by name, `acf_var`, `testdpm_init`) |
+| 2 · Priors | ✅ Analysis done (`docs/priors.md`). **C3 adopted**; switching the defaults is the first task of Phase 3. |
+| 3 · Refactor | ▶ Next |
+| 4–7 | Not started |
 
 ## 00 Ground rules for the coding session
 
@@ -28,7 +38,8 @@ the companion review page.
 |---|---|
 | Main sampler | Design A: Neal Algorithm 8 with $G$ and the cluster-level β integrated out, plus a joint label/latent step (R2) and a collapsed $\sigma_{23}$ step (R3). It replaces the current `marginal` and, once validated, `dpm`. |
 | Slopes | **`slopes = :common` is the default**: covariate slopes are shared and the DPM is over the intercepts and Σ. `slopes = :cluster` is an option: the full β per cluster, as today. |
-| Priors | Calibrate priors first (Phase 2), with prior-predictive checks. |
+| Priors | **C3** from Phase 2, on the standardized scale: $d^*$ intercept $N(0,0.5^2)$; $y$ intercepts $N(0,1)$; probit slopes $N(0,0.5^2)$; outcome slopes $N(0,0.5^2)$ per cluster, or $N(0,1)$ when shared; $\rho=10$, $R=\mathrm{diag}(0.1,\,0.153,\,0.153)$; $\alpha\sim\mathrm{Gamma}(2,2)$. Cluster intercepts get a hierarchical prior (Phase 4). |
+| Diagnostics | Every fit reports the share of units in treatment-separated clusters: clusters that are under 5% or over 95% treated. |
 | Design B (Chib 2007) | Deferred, possibly indefinitely, if R3 delivers the mixing. |
 | Individual gains | Later: a $\sigma_{23}$ prior-sensitivity table plus Fréchet–Makarov bounds. |
 | `blocked` | Kept as an independent cross-check, with its bugs fixed. |
@@ -83,7 +94,19 @@ $\mathrm{Var}(y)=1$, and $\gamma\sim N(0,100)$ is far too diffuse for probit slo
 
 *Exit: prior-predictive plots and table in `docs/priors.md`, plus new defaults.*
 
+> **Done: outcome**
+>
+> - **C3 adopted.** It is the only candidate with under 10% of propensity mass outside (0.05, 0.95),
+>   the closest implied sd(y), the lowest new-cluster penalty (3.4 nats, against 9.8 before), and a
+>   stable ATE.
+> - **Treatment-separated clusters are a model-level risk** (C0 sent every unit there). That led to
+>   the hierarchical intercept prior and the separated-units diagnostic.
+> - A single `blocked` chain does not settle $k$, so don't compare priors on $k$.
+
 ## 05 Phase 3: state refactor (no math change)
+
+**First task:** switch `setup_default_priors` to C3, in the current per-cluster layout. Update the
+docstring, and update tests whose tolerances assumed C0.
 
 - `labels::Vector{Int}`, counts in a `Vector{Int}`, and per-cluster member lists or sufficient
   statistics. No `Dict` scans.
@@ -109,8 +132,14 @@ $$\mathbf z_i = H^{c}_i\,\beta^{c}_{c_i} + H^{g}_i\,b + \varepsilon_i,\qquad \va
   $H^g_i=\mathrm{blockdiag}(\tilde{\mathbf w}_i',\tilde{\mathbf x}_i',\tilde{\mathbf x}_i')$ holds
   the shared slopes, without intercept columns.
 - `:cluster`: $H^c_i=H_i$ (the full design) and there is no global part.
-- Priors: $\beta^c\sim N(\mu_c,V_c)$ and $b\sim N(\mu_g,V_g)$, independent of each other and of Σ.
-  Σ has the restricted IW prior.
+- Priors: $b\sim N(\mu_g,V_g)$, and Σ has the restricted IW prior. The cluster intercepts
+  $\mathbf a_j$ (the intercept entries of $\beta^c_j$) get a **hierarchical prior**:
+  $\mathbf a_j\sim N(\mathbf m,T)$ with $T=\mathrm{diag}(\tau_d^2,\tau_1^2,\tau_0^2)$,
+  $\mathbf m\sim N(0,V_m)$ with $V_m=\mathrm{diag}(0.5^2,1,1)$, and
+  $\tau_l^2\sim IG(3,\,2s_l^2)$, whose prior mean $s_l^2$ equals the C3 intercept variance.
+  Under `:cluster`, the non-intercept entries of $\beta^c_j$ keep independent C3 normals. The
+  collapsed predictive and the auxiliary clusters use $(\mathbf m,T)$ in place of $(\mu_c,V_c)$
+  for the intercept block.
 
 Let $\tilde{\mathbf z}_i=\mathbf z_i-H^g_ib$. With $\Sigma_j$ fixed, each cluster keeps
 $Q_j=V_c^{-1}+\sum_{i\in S_j}H^{c\prime}_i\Sigma_j^{-1}H^c_i$ and
@@ -167,6 +196,12 @@ these from Σ-free cross-products using the block identity on the review page (�
 6. **Latent refresh** (optional, cheap): one pass of the existing $y_{\text{miss}}$ and $d^*$
    conditionals (`sampler_functions.jl:241-287`, verified correct).
 7. **α:** Escobar–West with the random indicator, using $k$ = number of clusters.
+8. **Intercept hyperparameters**, given the $k$ cluster intercepts:
+
+   $$\mathbf m\sim N\big(P_m^{-1}T^{-1}\textstyle\sum_j\mathbf a_j,\ P_m^{-1}\big),\quad P_m=V_m^{-1}+kT^{-1};\qquad \tau_l^2\sim IG\big(3+\tfrac k2,\ 2s_l^2+\tfrac12\textstyle\sum_j(a_{l,j}-m_l)^2\big).$$
+
+   This lets a cluster that is all treated or all controls borrow its missing-arm intercept from
+   the other clusters, instead of falling back on the raw prior.
 
 > **Validity.** Steps 1–2 are a partially collapsed Gibbs (PCG) kernel: β<sup>c</sup> is
 > marginalized in step 1 and redrawn in step 2. Step 5 marginalizes $y_{\text{miss}}$ and redraws it
@@ -196,6 +231,8 @@ label-invariant summaries.*
   Fix the README's interval wording.
 - **Partition summaries:** posterior similarity matrix, a point partition (Binder or VI loss), and
   the posterior of $k$.
+- **Separated-units diagnostic:** the per-draw share of units in clusters that are under 5% or over
+  95% treated, with a warning when its posterior mean exceeds 5%.
 
 ## 08 Phase 6: tests and synthetic data
 
