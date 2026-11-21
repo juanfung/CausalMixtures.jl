@@ -30,6 +30,9 @@ result = @testset "CausalMixtures.jl Tests" begin
     # Phase 2 prior predictive simulator
     include("test_prior_predictive.jl")
 
+    # multi-chain diagnostics
+    include("test_diagnostics.jl")
+
     # Phase 3 state refactor
     include("test_phase3_refactor.jl")
 
