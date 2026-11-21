@@ -194,4 +194,25 @@ end
     @test_throws ArgumentError CausalMixtures.InputParams(M=6, thin=0)
 end
 
+@testset "every struct field has a concrete type" begin
+    M = CausalMixtures
+    types = Any[]
+    for nm in names(M; all=true)
+        isdefined(M, nm) || continue
+        T = getfield(M, nm)
+        T isa DataType && isstructtype(T) && parentmodule(T) === M && !startswith(string(nm), "#") && push!(types, T)
+    end
+    ## the parametric ones, as the package instantiates them
+    data = generate_hedonic_data(20, 1)
+    raw = M.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
+    params = M.InputParams(M=1, scale_data=(true, true), verbose=false, model="dpm")
+    _, input, _ = M.dpm_init(raw, setup_default_priors(2, 3, J=2), params)
+    append!(types, [typeof(raw), typeof(input.data.y), M.ScaleData{Matrix{Float64}}])
+    @test length(types) > 20
+    for T in types, (f, ft) in zip(fieldnames(T), fieldtypes(T))
+        @test isconcretetype(ft) || (T, f, ft)
+    end
+    @test input.data.y isa M.ScaleData{Vector{Float64}}
+end
+
 end # Phase 3 refactor

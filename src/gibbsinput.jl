@@ -2,20 +2,20 @@
 ## Data
 
 ## raw data input
-struct RawData
-    y_form::FormulaTerm
-    d_form::FormulaTerm
+struct RawData{FY<:FormulaTerm,FD<:FormulaTerm}
+    y_form::FY
+    d_form::FD
     df::DataFrame
 end
 
-## standardized data
-struct ScaleData
-    a::Array{Float64}
-    m::Array{Float64,1}
-    s::Array{Float64,1}
+## standardized data: a = (A .- m') ./ s' (a vector for y, a matrix for X and W)
+struct ScaleData{A<:Array{Float64}}
+    a::A
+    m::Vector{Float64}
+    s::Vector{Float64}
 end
 
-ScaleData(; a=[0.0], m=[0.0], s=[1.0]) = ScaleData(a, m, s)
+ScaleData(; a=[0.0], m=[0.0], s=[1.0]) = ScaleData(Array{Float64}(a), Vector{Float64}(m), Vector{Float64}(s))
 
 ## dimensions
 struct InputDims
@@ -29,7 +29,7 @@ InputDims(; n=1, kx=1, kz=1, ktot=1) = InputDims(n, kx, kz, ktot)
 
 ## transformed data for sampler
 struct InputData
-    y::Union{Vector{Float64},ScaleData}
+    y::ScaleData{Vector{Float64}} # outcome (y.a), and its centering and scale
     d::Vector{Int64}
     lower::Vector{Float64}
     upper::Vector{Float64}
@@ -40,7 +40,7 @@ struct InputData
     znames::Vector{String} # selection-equation columns of Hmat, in order
 end
 
-InputData(; y=[0.0], d=[0], lower=[0.0], upper=[0.0], Hmat=sparse([0.0]), X=zeros(0, 0), W=zeros(0, 0),
+InputData(; y=ScaleData(a=[0.0]), d=[0], lower=[0.0], upper=[0.0], Hmat=sparse([0.0]), X=zeros(0, 0), W=zeros(0, 0),
           xnames=String[], znames=String[]) =
     InputData(y, d, lower, upper, Hmat, X, W, xnames, znames)
 ## TODO: define InputData with/without {xmat,zmat}
