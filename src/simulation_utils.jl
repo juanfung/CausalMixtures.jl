@@ -129,22 +129,83 @@ function generate_hedonic_data(n::Int, seed::Int;
 end
 
 """
-    setup_default_priors(ktot::Int; kwargs...)
+    setup_default_priors(kx, kz; J=20, alpha=1.0, alpha_shape=2.0, alpha_rate=2.0,
+                         sd_intercept=1.0, sd_intercept_d=0.5, sd_probit=0.5, sd_outcome=0.5,
+                         rho=10, r=0.153, xintercept=1, zintercept=1)
+    setup_default_priors(raw::RawData; kwargs...)
 
-Set up default prior specifications for hedonic model testing.
+Default priors (candidate C3 of `docs/priors.md`) for a model with `kx` outcome-equation columns
+and `kz` selection-equation columns. The coefficient vector is `beta = (gamma, beta1, beta0)`,
+of length `ktot = kz + 2kx`, in the column order of the model matrices.
 
-# Arguments  
-- `ktot::Int`: Total number of parameters
+**The defaults are on the standardized scale: run the sampler with `scale_data = (true, true)`.**
+On raw data with sd(y) far from 1 they shrink the coefficients too much.
 
-# Keyword Arguments
-- `alpha::Float64`: DP concentration parameter (default: 1.0)
-- `J::Int`: Number of mixture components (default: 20)
-- `beta_nu::Float64`: Prior precision scaling (default: 100.0)
-- `rho::Float64`: Wishart degrees of freedom (default: 6.0)
-- `r::Float64`: Wishart scale parameter (default: 2.0)
+| Parameter | Prior | Why |
+|---|---|---|
+| selection intercept (`d*`) | N(0, `sd_intercept_d`² = 0.5²) | keeps cluster propensities inside (0.05, 0.95); a cluster that is all treated or all controls identifies its missing arm only through the prior |
+| outcome intercepts (`y1`, `y0`) | N(0, `sd_intercept`² = 1) | cluster means of standardized y spread over about ±2 |
+| probit slopes | N(0, `sd_probit`² = 0.5²) | with standardized w, about 6% of prior propensity mass outside (0.05, 0.95) (C0: 92%) |
+| outcome slopes | N(0, `sd_outcome`² = 0.5²) | implied sd(y) about 1.1, against 1 in the data |
+| `Sigma` | `NobileWishart(rho, rho*R)`, `rho = 10`, `R = diag(1/rho, r, r)`, `r = 0.153` | prior median within-cluster Var(y1) and Var(y0) of 0.3 |
+| `alpha` | Gamma(`alpha_shape` = 2, rate `alpha_rate` = 2), started at `alpha` = 1 | E[k] about 6.6 at n = 500, wide but not degenerate at 1 |
 
-# Returns
-`InputPriors` object ready for sampler initialization
+All prior means are zero and the coefficients are independent. `xintercept` and `zintercept`
+give the position of the intercept column in each equation (`nothing` if there is none); the
+`RawData` method reads them from the formulas. Set `alpha_shape = 0` to fix alpha at `alpha`.
+`J` is the truncation level for `blocked`, `fmn` and `marginal`, and the initial number of
+components for `dpm`.
+
+The calibration, its targets and the comparison with the other candidates are in
+`docs/priors.md`.
+"""
+function setup_default_priors(kx::Integer, kz::Integer;
+                              J::Integer = 20,
+                              alpha::Real = 1.0,
+                              alpha_shape::Real = 2.0,
+                              alpha_rate::Real = 2.0,
+                              sd_intercept::Real = 1.0,
+                              sd_intercept_d::Real = 0.5,
+                              sd_probit::Real = 0.5,
+                              sd_outcome::Real = 0.5,
+                              rho::Integer = 10,
+                              r::Real = 0.153,
+                              xintercept::Union{Integer,Nothing} = 1,
+                              zintercept::Union{Integer,Nothing} = 1)
+    kx >= 1 && kz >= 1 || throw(ArgumentError("kx and kz must be positive, got kx = $kx, kz = $kz"))
+    for (pos, k, nm) in ((xintercept, kx, "xintercept"), (zintercept, kz, "zintercept"))
+        pos === nothing || 1 <= pos <= k || throw(ArgumentError("$nm = $pos is not a column in 1:$k"))
+    end
+    sd_d = fill(Float64(sd_probit), kz)
+    zintercept === nothing || (sd_d[zintercept] = sd_intercept_d)
+    sd_y = fill(Float64(sd_outcome), kx)
+    xintercept === nothing || (sd_y[xintercept] = sd_intercept)
+    V0 = Diagonal(vcat(sd_d, sd_y, sd_y) .^ 2)
+
+    prior_dp = PriorDP(J=Int(J), alpha=Float64(alpha), alpha_shape=Float64(alpha_shape),
+                       alpha_rate=Float64(alpha_rate))
+    prior_beta = PriorBeta(mu=zeros(kz + 2kx), V=Matrix(inv(V0)), Vinv=true)
+    prior_sigma = PriorSigma(rho=Int(rho), R=Matrix(Diagonal([1/rho, r, r])))
+    return InputPriors(prior_dp=prior_dp, prior_theta=PriorTheta(prior_beta=prior_beta, prior_Sigma=prior_sigma))
+end
+
+## intercept positions read from the formulas, by column name
+function setup_default_priors(raw::RawData; kwargs...)
+    xnames = string.(coefnames(ModelFrame(raw.y_form, raw.df)))
+    znames = string.(coefnames(ModelFrame(raw.d_form, raw.df)))
+    xnames isa AbstractVector || (xnames = [xnames])
+    znames isa AbstractVector || (znames = [znames])
+    return setup_default_priors(length(xnames), length(znames);
+                                xintercept=findfirst(==("(Intercept)"), xnames),
+                                zintercept=findfirst(==("(Intercept)"), znames), kwargs...)
+end
+
+"""
+    setup_default_priors(ktot::Int; alpha=1.0, J=20, beta_nu=100.0, rho=6.0, r=2.0)
+
+Deprecated: the pre-calibration prior (candidate C0 of `docs/priors.md`), beta ~ N(0, beta_nu I),
+`Sigma ~ NobileWishart(rho, rho*diag(1/rho, r, r))`, alpha fixed. It is kept unchanged for old
+scripts. Use `setup_default_priors(kx, kz)` or `setup_default_priors(raw::RawData)`.
 """
 function setup_default_priors(ktot::Int;
                              alpha::Float64 = 1.0,
@@ -152,6 +213,9 @@ function setup_default_priors(ktot::Int;
                              beta_nu::Float64 = 100.0,
                              rho::Float64 = 6.0,
                              r::Float64 = 2.0)
+    @warn "setup_default_priors(ktot) is deprecated: it returns the old diffuse prior (C0 in " *
+          "docs/priors.md). Use setup_default_priors(kx, kz) or setup_default_priors(raw::RawData) " *
+          "for the calibrated defaults."
     
     # Beta prior
     beta_mu = zeros(ktot)

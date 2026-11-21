@@ -25,8 +25,7 @@ using Test, Statistics, Random
     @testset "Blocked Sampler Integration" begin
         # Test blocked sampler specifically
         data_test = CausalMixtures.generate_hedonic_data(200, 1234)
-        priors_test = CausalMixtures.setup_default_priors(data_test.true_params.ktot, 
-                                                         beta_nu=100.0, rho=6.0, r=2.0)
+        priors_test = CausalMixtures.setup_default_priors(2, 3)
         raw_data_test = CausalMixtures.RawData(data_test.formulas.formula_y, 
                                              data_test.formulas.formula_d, data_test.df)
         
@@ -63,8 +62,7 @@ using Test, Statistics, Random
     @testset "DPM Sampler Integration" begin
         # Test dpm sampler specifically  
         data_test2 = CausalMixtures.generate_hedonic_data(200, 5678)
-        priors_test2 = CausalMixtures.setup_default_priors(data_test2.true_params.ktot, 
-                                                          beta_nu=100.0, rho=6.0, r=2.0)
+        priors_test2 = CausalMixtures.setup_default_priors(2, 3)
         raw_data_test2 = CausalMixtures.RawData(data_test2.formulas.formula_y, 
                                               data_test2.formulas.formula_d, data_test2.df)
         
@@ -101,8 +99,7 @@ using Test, Statistics, Random
     @testset "FMN Sampler Integration" begin
         # Test fmn sampler specifically  
         data_test3 = CausalMixtures.generate_hedonic_data(200, 9999)
-        priors_test3 = CausalMixtures.setup_default_priors(data_test3.true_params.ktot, 
-                                                          beta_nu=100.0, rho=6.0, r=2.0)
+        priors_test3 = CausalMixtures.setup_default_priors(2, 3)
         raw_data_test3 = CausalMixtures.RawData(data_test3.formulas.formula_y, 
                                               data_test3.formulas.formula_d, data_test3.df)
         
@@ -140,8 +137,7 @@ using Test, Statistics, Random
         # Test gaussian sampler specifically  
         data_test4 = CausalMixtures.generate_hedonic_data(200, 7777)
         ## SET J = 1 manually!
-        priors_test4 = CausalMixtures.setup_default_priors(data_test4.true_params.ktot, 
-                                                           beta_nu=100.0, rho=6.0, r=2.0, J=1)
+        priors_test4 = CausalMixtures.setup_default_priors(2, 3, J=1)
         raw_data_test4 = CausalMixtures.RawData(data_test4.formulas.formula_y, 
                                                 data_test4.formulas.formula_d, data_test4.df)
         params_test4 = CausalMixtures.InputParams(M=50, scale_data=(true,true), 
@@ -177,7 +173,7 @@ using Test, Statistics, Random
     @testset "Multi-Sampler Consistency Comparison" begin
         # Compare all working samplers on same data
         data_comp = CausalMixtures.generate_hedonic_data(150, 42)
-        priors_comp = CausalMixtures.setup_default_priors(data_comp.true_params.ktot)
+        priors_comp = CausalMixtures.setup_default_priors(2, 3)
         raw_data_comp = CausalMixtures.RawData(data_comp.formulas.formula_y, 
                                              data_comp.formulas.formula_d, data_comp.df)
         
@@ -187,7 +183,7 @@ using Test, Statistics, Random
         
         for sampler in samplers
             if sampler == "gaussian"
-                priors_sampler = CausalMixtures.setup_default_priors(data_comp.true_params.ktot, J=1)
+                priors_sampler = CausalMixtures.setup_default_priors(2, 3, J=1)
             else
                 priors_sampler = priors_comp
             end

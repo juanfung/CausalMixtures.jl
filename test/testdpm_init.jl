@@ -8,8 +8,8 @@ using CausalMixtures, DataFrames, StatsModels
     y_form = @formula(y ~ x1 + x2)
     d_form = @formula(d ~ x1 + x2)
     raw_data = CausalMixtures.RawData(y_form, d_form, df)
-    ## kx = kz = 3, so ktot = 9; PriorTheta()'s defaults (2-dim beta, rho = 1) are not valid here
-    prior = CausalMixtures.setup_default_priors(9, J = 20)
+    ## kx = kz = 3, so ktot = 9; PriorTheta() defaults (2-dim beta, rho = 1) are not valid here
+    prior = CausalMixtures.setup_default_priors(3, 3, J = 20)
     param = CausalMixtures.InputParams(M = 1, scale_data = (true, true), verbose = true)
     state, input, output = CausalMixtures.dpm_init(raw_data, prior, param)
     @test state isa CausalMixtures.GibbsState

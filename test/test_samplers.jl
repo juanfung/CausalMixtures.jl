@@ -8,7 +8,7 @@ data_test = CausalMixtures.generate_hedonic_data(200, 1111)
     
 @testset "Gaussian Sampler Smoke Test" begin
     # FIXED: Set J=1 in priors, not params
-    priors_gaussian = CausalMixtures.setup_default_priors(data_test.true_params.ktot, J=1)
+    priors_gaussian = CausalMixtures.setup_default_priors(2, 3, J=1)
     raw_data_test = CausalMixtures.RawData(data_test.formulas.formula_y, 
                                            data_test.formulas.formula_d, data_test.df)
     params_gaussian = CausalMixtures.InputParams(M=5, verbose=false, model="gaussian")
@@ -27,7 +27,7 @@ data_test = CausalMixtures.generate_hedonic_data(200, 1111)
 end
     
 @testset "FMN Sampler Smoke Test" begin
-    priors_test = CausalMixtures.setup_default_priors(data_test.true_params.ktot)
+    priors_test = CausalMixtures.setup_default_priors(2, 3)
     raw_data_test = CausalMixtures.RawData(data_test.formulas.formula_y, 
                                            data_test.formulas.formula_d, data_test.df)
     params_fmn = CausalMixtures.InputParams(M=5, verbose=false, model="fmn")
@@ -47,7 +47,7 @@ end
 end
     
 @testset "Blocked Sampler Smoke Test" begin
-    priors_test = CausalMixtures.setup_default_priors(data_test.true_params.ktot)
+    priors_test = CausalMixtures.setup_default_priors(2, 3)
     raw_data_test = CausalMixtures.RawData(data_test.formulas.formula_y, 
                                            data_test.formulas.formula_d, data_test.df)
     params_blocked = CausalMixtures.InputParams(M=5, verbose=false, model="blocked")
@@ -69,7 +69,7 @@ end
 end
     
 @testset "DPM Sampler Smoke Test" begin
-    priors_test = CausalMixtures.setup_default_priors(data_test.true_params.ktot)
+    priors_test = CausalMixtures.setup_default_priors(2, 3)
     raw_data_test = CausalMixtures.RawData(data_test.formulas.formula_y, 
                                            data_test.formulas.formula_d, data_test.df)
     params_dpm = CausalMixtures.InputParams(M=5, verbose=false, model="dpm")
@@ -90,7 +90,7 @@ end
     
 @testset "PPD and ATE Smoke Test" begin
     # Use blocked sampler for this test
-    priors_test = CausalMixtures.setup_default_priors(data_test.true_params.ktot)
+    priors_test = CausalMixtures.setup_default_priors(2, 3)
     raw_data_test = CausalMixtures.RawData(data_test.formulas.formula_y, 
                                            data_test.formulas.formula_d, data_test.df)
     params_test = CausalMixtures.InputParams(M=10, verbose=false, model="blocked")

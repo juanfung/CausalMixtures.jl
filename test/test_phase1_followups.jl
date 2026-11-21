@@ -10,7 +10,7 @@ using .TestHelpers
     df = data.df
     raw_xz = CausalMixtures.RawData(@formula(Y_obs ~ X), @formula(D_obs ~ X + Z), df)
     raw_zx = CausalMixtures.RawData(@formula(Y_obs ~ X), @formula(D_obs ~ Z + X), df)
-    priors = setup_default_priors(data.true_params.ktot, J=3)
+    priors = setup_default_priors(2, 3, J=3)
     params = CausalMixtures.InputParams(M=8, verbose=false, model="dpm")
     seed_global!()
     _, in_xz, out_xz = CausalMixtures.dpm!(CausalMixtures.dpm_init(raw_xz, priors, params)...)

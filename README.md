@@ -31,9 +31,10 @@ formula_d = @formula(D_obs ~ Z + X)    # Selection equation
 # Create data object
 raw_data = RawData(formula_y, formula_d, data.df)
 
-# Set up priors (use defaults)
-ktot = 7  # Number of parameters (adjust based on your model)
-priors = setup_default_priors(ktot, beta_nu=100.0, rho=6.0, r=2.0)
+# Set up priors: the calibrated defaults (docs/priors.md), on the standardized scale,
+# so run with scale_data=(true,true). Intercept columns are found by name.
+priors = setup_default_priors(raw_data)
+# equivalently setup_default_priors(kx, kz) with kx = 2 outcome and kz = 3 selection columns
 ```
 
 ### 3. Run Sampler
@@ -73,7 +74,7 @@ println("95% CI: $(round.(quantile(tes.ate, [0.025, 0.975]), digits=3))")
 | Function | Purpose | Notes |
 |----------|---------|-------|
 | `generate_hedonic_data(n, seed)` | Simulate test data | Returns data object with true effects |
-| `setup_default_priors(ktot)` | Create default priors | ktot = # parameters in model |
+| `setup_default_priors(raw_data)` | Default priors (C3, standardized scale) | or `setup_default_priors(kx, kz)`; the old `setup_default_priors(ktot)` is deprecated |
 | `dpm_init()` | Initialize sampler | Returns (state, input, output) |
 | `dpm!()` | Run MCMC sampler | Main sampling function |
 | `rand_ppd()` | Posterior predictive draws | Size: (3 × M) matrix |

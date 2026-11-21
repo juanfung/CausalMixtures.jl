@@ -22,7 +22,7 @@ row(xs...) = println("| ", join(xs, " | "), " |")
 data = generate_hedonic_data(500, 1234)
 raw = CausalMixtures.RawData(@formula(Y_obs ~ X), @formula(D_obs ~ X + Z), data.df)
 Random.seed!(SEED)
-_, inp, _ = CausalMixtures.dpm_init(raw, setup_default_priors(7, J=1),
+_, inp, _ = CausalMixtures.dpm_init(raw, setup_default_priors(2, 3, J=1),
                                     CausalMixtures.InputParams(M=1, scale_data=(true, true), verbose=false, model="gaussian"))
 n, kx, kw = inp.dims.n, inp.dims.kx, inp.dims.kz
 H = inp.data.Hmat

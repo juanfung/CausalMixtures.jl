@@ -32,21 +32,12 @@ using CausalMixtures
 end
     
 @testset "setup_default_priors function" begin
-    # Test basic functionality
-    @test_nowarn priors = CausalMixtures.setup_default_priors(7)
-    
-    priors = CausalMixtures.setup_default_priors(5)
-    
-    # Test structure exists (Julia 1.0 compatible)
+    @test_nowarn priors = CausalMixtures.setup_default_priors(2, 3)
+    priors = CausalMixtures.setup_default_priors(2, 3)
     @test :prior_dp in fieldnames(typeof(priors))
     @test :prior_theta in fieldnames(typeof(priors))
     @test :prior_beta in fieldnames(typeof(priors.prior_theta))
     @test :prior_Sigma in fieldnames(typeof(priors.prior_theta))
-    
-    # Test custom parameters (just test it doesn't crash)
-    @test_nowarn priors_custom = CausalMixtures.setup_default_priors(7, beta_nu=50.0, rho=6.0, r=2.0)
-    
-    # Test invalid input (Julia 1.0 compatible error types)
-    #@test_throws ErrorException CausalMixtures.setup_default_priors(0)
-    #@test_throws ErrorException CausalMixtures.setup_default_priors(-1)
+    @test length(priors.prior_theta.prior_beta.mu) == 7
+    @test_nowarn CausalMixtures.setup_default_priors(2, 3, rho=6, r=0.13, J=1)
 end

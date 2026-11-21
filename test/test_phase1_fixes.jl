@@ -27,14 +27,16 @@ using .TestHelpers
         @test moments_match(B, mu, V0)
     end
 
-    ## defaults: V0 = 100 I, so prior sd 10 (it was 0.1 before the fix)
-    pr = setup_default_priors(7)
-    @test pr.prior_theta.prior_beta.V ≈ Matrix(0.01I, 7, 7)
-    @test pr.prior_theta.prior_beta.Vcov ≈ Matrix(100.0I, 7, 7)
+    ## defaults (C3): V0 = diag(0.5², 0.5², 0.5², 1, 0.5², 1, 0.5²) for (gamma, beta1, beta0) with
+    ## kz = 3, kx = 2 (the precision was used as the covariance before the fix)
+    pr = setup_default_priors(2, 3)
+    V0 = Matrix(Diagonal([0.25, 0.25, 0.25, 1.0, 0.25, 1.0, 0.25]))
+    @test pr.prior_theta.prior_beta.V ≈ inv(V0)
+    @test pr.prior_theta.prior_beta.Vcov ≈ V0
     seed_global!()
     th = CausalMixtures.StateTheta()
     B = reduce(vcat, (CausalMixtures.sample_prior_theta!(th, pr.prior_theta, 1)[1].beta' for _ in 1:20_000))
-    @test covs_match(B, Matrix(100.0I, 7, 7); mean=zeros(7))
+    @test covs_match(B, V0; mean=zeros(7))
 end
 
 @testset "Fix 3: Escobar-West alpha step uses a random mixture indicator" begin
@@ -86,7 +88,7 @@ end
     raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
     for model in ("dpm", "fmn", "blocked", "marginal")
         seed_global!()
-        priors = setup_default_priors(data.true_params.ktot, J=3)
+        priors = setup_default_priors(2, 3, J=3)
         params = CausalMixtures.InputParams(M=1, verbose=false, model=model)
         state, input, out = CausalMixtures.dpm_init(raw, priors, params)
         state.state_data.y1[1] = 1e4
@@ -106,7 +108,7 @@ end
     ## n = 12 units spread over J = 30 components: most components start empty
     data = generate_hedonic_data(12, 2024)
     raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
-    priors = setup_default_priors(data.true_params.ktot, J=30)
+    priors = setup_default_priors(2, 3, J=30)
     for model in ("dpm", "fmn", "blocked", "marginal")
         seed_global!()
         params = CausalMixtures.InputParams(M=3, verbose=false, model=model)
@@ -156,7 +158,7 @@ end
 @testset "Fix P1: saved blocked weights do not alias across iterations" begin
     data = generate_hedonic_data(100, 7)
     raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
-    priors = setup_default_priors(data.true_params.ktot, J=6)
+    priors = setup_default_priors(2, 3, J=6)
     params = CausalMixtures.InputParams(M=20, verbose=false, model="blocked")
     seed_global!()
     state, input, out = CausalMixtures.dpm!(CausalMixtures.dpm_init(raw, priors, params)...)
@@ -186,7 +188,7 @@ end
     yf = @formula(Y_obs ~ X)
     raw_xz = CausalMixtures.RawData(yf, @formula(D_obs ~ X + Z), df)
     raw_zx = CausalMixtures.RawData(yf, @formula(D_obs ~ Z + X), df)
-    priors = setup_default_priors(data.true_params.ktot, J=1)
+    priors = setup_default_priors(2, 3, J=1)
     params = CausalMixtures.InputParams(M=25, verbose=false, model="gaussian")
 
     seed_global!()
@@ -227,7 +229,7 @@ end
 
     ## an outcome column missing from the selection equation needs xnew and wnew explicitly
     raw_w = CausalMixtures.RawData(@formula(Y_obs ~ X), @formula(D_obs ~ Z), df)
-    _, in_w, _ = CausalMixtures.dpm_init(raw_w, setup_default_priors(6, J=1), params)
+    _, in_w, _ = CausalMixtures.dpm_init(raw_w, setup_default_priors(2, 2, J=1), params)
     @test_throws ArgumentError CausalMixtures.ppd_design(in_w, [1.0, 0.5])
     @test size(CausalMixtures.ppd_design(in_w, [1.0, 0.2], [1.0, 0.5])) == (3, 6)
     @test_throws DimensionMismatch CausalMixtures.ppd_design(in_w, [1.0], [1.0, 0.5])
@@ -246,7 +248,7 @@ end
     raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
     for model in ("dpm", "blocked", "marginal", "fmn", "gaussian")
         seed_global!()
-        priors = setup_default_priors(data.true_params.ktot, J = model == "gaussian" ? 1 : 3)
+        priors = setup_default_priors(2, 3, J = model == "gaussian" ? 1 : 3)
         state, input, out = CausalMixtures.dpm_init(raw, priors,
                                 CausalMixtures.InputParams(M=3, verbose=false, model=model))
         latent = copy(state.state_data)
@@ -263,7 +265,7 @@ end
     raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
     seed_global!()
     params = CausalMixtures.InputParams(M=4, scale_data=(true, true), verbose=false, model="blocked")
-    state, input, out = CausalMixtures.dpm!(CausalMixtures.dpm_init(raw, setup_default_priors(7, J=3), params)...)
+    state, input, out = CausalMixtures.dpm!(CausalMixtures.dpm_init(raw, setup_default_priors(2, 3, J=3), params)...)
     ## the observed outcome is never imputed, so check_y recovers it on the original scale
     @test CausalMixtures.check_y(input, out) ≈ data.df.Y_obs
 
@@ -288,7 +290,7 @@ end
     raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
     seed_global!()
     params = CausalMixtures.InputParams(M=6, verbose=false, model="dpm")
-    state, input, out = CausalMixtures.dpm!(CausalMixtures.dpm_init(raw, setup_default_priors(7, J=3), params)...)
+    state, input, out = CausalMixtures.dpm!(CausalMixtures.dpm_init(raw, setup_default_priors(2, 3, J=3), params)...)
     V0 = Matrix(Diagonal(collect(1.0:7.0)))
     sig = input.priors.prior_theta.prior_Sigma
     pt_cov = CausalMixtures.PriorTheta(CausalMixtures.PriorBeta(mu=zeros(7), V=V0, Vinv=false), sig)
@@ -309,7 +311,7 @@ end
     @test !isdefined(CausalMixtures, :single_dpm_ppd)
     data = generate_hedonic_data(40, 8)
     raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
-    priors = setup_default_priors(7, J=3)
+    priors = setup_default_priors(2, 3, J=3)
     @test_logs (:warn, r"deprecated") CausalMixtures.dpm_init(raw, priors,
         CausalMixtures.InputParams(M=1, verbose=false, model="marginal"))
     @test_logs CausalMixtures.dpm_init(raw, priors, CausalMixtures.InputParams(M=1, verbose=false, model="blocked"))
