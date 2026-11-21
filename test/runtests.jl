@@ -35,6 +35,7 @@ result = @testset "CausalMixtures.jl Tests" begin
 
     # Design A sampler (Phase 4a)
     include("test_designA.jl")
+    include("test_geweke.jl")  # smoke; CM_GEWEKE=1 for the long runs
 
     # Phase 3 state refactor
     include("test_phase3_refactor.jl")
