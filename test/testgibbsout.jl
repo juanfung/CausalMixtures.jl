@@ -9,9 +9,13 @@ using LinearAlgebra
 @testset "GibbsOut constructor" begin
     gout = CausalMixtures.GibbsOut(10)
     @test gout isa CausalMixtures.GibbsOut
-    @test length(gout.out_data) == 10
+    @test length(gout.out_data) == 0  # latent data are not saved by default
     @test length(gout.out_dp) == 10
     @test length(gout.out_theta) == 10
+    gout = CausalMixtures.GibbsOut(10; thin=3, latent_thin=5)
+    @test length(gout.out_dp) == length(gout.out_theta) == 3
+    @test length(gout.out_data) == length(gout.out_labels) == 2
+    @test_throws ArgumentError CausalMixtures.GibbsOut(10; thin=0)
 end
 
 # Test the default GibbsOut constructor

@@ -213,7 +213,6 @@ end
         b[1:kz] = th.beta[perm]
         out_zx.out_theta[m] = [CausalMixtures.Theta(b, th.Sigma)]
         out_zx.out_dp[m] = out_xz.out_dp[m]
-        out_zx.out_data[m] = out_xz.out_data[m]
     end
 
     ## same PPD from both orders, via (xbar, wbar) and via the selection covariates alone
@@ -264,10 +263,12 @@ end
     data = generate_hedonic_data(50, 11)
     raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
     seed_global!()
-    params = CausalMixtures.InputParams(M=4, scale_data=(true, true), verbose=false, model="blocked")
+    params = CausalMixtures.InputParams(M=4, scale_data=(true, true), verbose=false, model="blocked", latent_thin=1)
     state, input, out = CausalMixtures.dpm!(CausalMixtures.dpm_init(raw, setup_default_priors(2, 3, J=3), params)...)
     ## the observed outcome is never imputed, so check_y recovers it on the original scale
     @test CausalMixtures.check_y(input, out) ≈ data.df.Y_obs
+    out0 = CausalMixtures.GibbsOut(4)
+    @test_throws ArgumentError CausalMixtures.check_y(input, out0)
 
     a = collect(1.0:12.0)
     @test CausalMixtures.batch_var(a, 3) ≈ var([2.0, 5.0, 8.0, 11.0]) / 4

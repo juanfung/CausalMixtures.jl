@@ -157,4 +157,41 @@ end
     @test CausalMixtures.sample_logweights(Xoshiro(5), [0.0, 1.0]) == CausalMixtures.sample_logweights(Xoshiro(5), [0.0, 1.0])
 end
 
+@testset "thinned output: (theta, n_j, alpha) every thin-th draw, latent data optional" begin
+    data = generate_hedonic_data(50, 13)
+    raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
+    priors = setup_default_priors(2, 3, J=4)
+    for model in ("dpm", "blocked", "gaussian")
+        pr = model == "gaussian" ? setup_default_priors(2, 3, J=1) : priors
+        ## the same chain saved three ways: every draw, thinned, thinned with latent data
+        outs = map([(1, 0), (3, 0), (3, 4)]) do (thin, lt)
+            params = CausalMixtures.InputParams(M=12, scale_data=(true, true), verbose=false, model=model,
+                                                thin=thin, latent_thin=lt)
+            rng = Xoshiro(8)
+            CausalMixtures.dpm!(CausalMixtures.dpm_init(raw, pr, params; rng=rng)...; rng=rng)
+        end
+        (_, _, full), (_, _, thinned), (st, _, withlat) = outs
+        @test length(full.out_dp) == 12 && isempty(full.out_data) && isempty(full.out_labels)
+        @test length(thinned.out_dp) == length(thinned.out_theta) == 4
+        @test isempty(thinned.out_data)
+        @test [d.alpha for d in thinned.out_dp] == [full.out_dp[m].alpha for m in 3:3:12]
+        @test [d.njs for d in thinned.out_dp] == [full.out_dp[m].njs for m in 3:3:12]
+        @test all(thinned.out_theta[s][j].beta == full.out_theta[3s][j].beta
+                  for s in 1:4 for j in eachindex(thinned.out_theta[s]))
+        @test length(withlat.out_data) == length(withlat.out_labels) == 3
+        @test withlat.out_data[3].y1 == st.state_data.y1 && withlat.out_labels[3] == st.state_dp.labels
+        @test withlat.out_data[1].y1 != withlat.out_data[2].y1
+        ## saved draws do not alias the live state
+        @test full.out_dp[1] isa CausalMixtures.DrawDP
+        @test full.out_dp[1].njs !== full.out_dp[2].njs
+    end
+    ## continuing a chain appends, with the same thinning
+    params = CausalMixtures.InputParams(M=6, scale_data=(true, true), verbose=false, model="blocked", thin=2)
+    rng = Xoshiro(1)
+    st, inp, out = CausalMixtures.dpm!(CausalMixtures.dpm_init(raw, priors, params; rng=rng)...; rng=rng)
+    st, inp, out = CausalMixtures.dpm!(st, inp, out; rng=rng)
+    @test length(out.out_dp) == 6
+    @test_throws ArgumentError CausalMixtures.InputParams(M=6, thin=0)
+end
+
 end # Phase 3 refactor

@@ -48,14 +48,24 @@ InputData(; y=[0.0], d=[0], lower=[0.0], upper=[0.0], Hmat=sparse([0.0]), X=zero
 ## --------------------------------------------------------------------------- #
 ## Parameters
 
+## M iterations; save the component parameters every `thin`-th iteration and the latent data
+## and labels every `latent_thin`-th iteration (0 = never)
 mutable struct InputParams
     M::Int64
     scale_data::Tuple{Bool,Bool}
     verbose::Bool
     model::String
+    thin::Int64
+    latent_thin::Int64
+    function InputParams(M, scale_data, verbose, model, thin, latent_thin)
+        thin >= 1 || throw(ArgumentError("thin must be >= 1, got $thin"))
+        latent_thin >= 0 || throw(ArgumentError("latent_thin must be >= 0, got $latent_thin"))
+        return new(M, scale_data, verbose, model, thin, latent_thin)
+    end
 end
 
-InputParams(; M=100, scale_data=(false,false), verbose=true, model="dpm") = InputParams(M, scale_data, verbose, model)
+InputParams(; M=100, scale_data=(false,false), verbose=true, model="dpm", thin=1, latent_thin=0) =
+    InputParams(M, scale_data, verbose, model, thin, latent_thin)
 ## set default model to dpm
 InputParams(m, s, v) = InputParams(M=m, scale_data=s, verbose=v, model="dpm")
 

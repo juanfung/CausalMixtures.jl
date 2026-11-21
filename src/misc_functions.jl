@@ -173,6 +173,7 @@ end
 
 ## check data augmentation
 function check_y(input::GibbsInput, out::GibbsOut)
+    isempty(out.out_data) && throw(ArgumentError("no latent draws were saved: run with InputParams(latent_thin = k > 0)"))
     my, sy = input.data.y.m[1], input.data.y.s[1]
     y_out = Array{Float64}(undef, input.dims.n, length(out.out_data) )
     for m in 1:length(out.out_data)

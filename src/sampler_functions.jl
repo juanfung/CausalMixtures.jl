@@ -310,11 +310,30 @@ function update_alpha!(rng::AbstractRNG, state::GibbsState, input::GibbsInput)
 
 end
 
-## update output
+## size the output for a run of M iterations with the thinning in params
+function prepare_out!(out::GibbsOut, params::InputParams)
+    out.thin, out.latent_thin = params.thin, params.latent_thin
+    nl = params.latent_thin == 0 ? 0 : params.M ÷ params.latent_thin
+    resize!(out.out_dp, params.M ÷ params.thin)
+    resize!(out.out_theta, params.M ÷ params.thin)
+    resize!(out.out_data, nl)
+    resize!(out.out_labels, nl)
+    return out
+end
+
+## save iteration m: theta, counts and alpha every thin-th iteration (the Theta objects are
+## shared, not copied), latent data and labels every latent_thin-th iteration
 function update_out!(state::GibbsState, out::GibbsOut, m::Int64)
-    out.out_data[m] = copy(state.state_data)
-    out.out_dp[m] = copy(state.state_dp)
-    out.out_theta[m] = copy(state.state_theta)
+    if m % out.thin == 0
+        s = m ÷ out.thin
+        out.out_dp[s] = DrawDP(state.state_dp)
+        out.out_theta[s] = copy(state.state_theta)
+    end
+    if out.latent_thin > 0 && m % out.latent_thin == 0
+        s = m ÷ out.latent_thin
+        out.out_data[s] = copy(state.state_data)
+        out.out_labels[s] = copy(state.state_dp.labels)
+    end
     return out
 end
 

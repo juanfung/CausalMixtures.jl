@@ -28,7 +28,6 @@ using .TestHelpers
         end
         out_zx.out_theta[m] = th
         out_zx.out_dp[m] = out_xz.out_dp[m]
-        out_zx.out_data[m] = out_xz.out_data[m]
     end
 
     _, w_xz = mean_covariates(in_xz)

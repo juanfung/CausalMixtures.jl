@@ -193,7 +193,7 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
                        state_theta=state_theta, state_sampler=state_sampler)
     
     ## 3. pre-allocate output
-    out = GibbsOut(M)
+    out = GibbsOut(params)
     
     if verbose println("Ready!") end
     
@@ -212,18 +212,16 @@ function dpm_chain!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=fa
     ##out = GibbsOut( [out, Array(StateTheta, input.params.M) ] )    
     dpm_sampler = set_sampler(input.params.model)
     ## pre-allocate storage for new chain
-    out_new = GibbsOut(input.params.M)
+    out_new = GibbsOut(input.params)
     ## 2. run sampler
     if input.params.verbose println("Continuing from last state...") end
     state, input, out_new = dpm_sampler( state, input, out_new, test=test, rng=rng )
     ## append new output to old output
     ##out.out_M += out_new.out_M
     append!(out.out_data, out_new.out_data)
-    out_data = 0
     append!(out.out_dp, out_new.out_dp)
-    out_dp = 0
     append!(out.out_theta, out_new.out_theta)
-    out_new = 0    
+    append!(out.out_labels, out_new.out_labels)
     return (state, input, out)
 end
 
@@ -231,14 +229,12 @@ end
 ## rng: the random number generator for every draw (default: the global RNG)
 function dpm!(state::GibbsState, input::GibbsInput, out::GibbsOut=GibbsOut(0); test=false,
               rng::AbstractRNG=Random.default_rng())
-    if ( state.state_sampler.chain && length(out.out_data) > 0 )
+    if ( state.state_sampler.chain && length(out.out_dp) > 0 )
         ## append output
         out_tup = dpm_chain!(state, input, out, test = test, rng = rng)
     else
-        ## no out given?
-        if length(out.out_data) == 0 ## || state.state_sampler.chain == false )
-            out = GibbsOut(input.params.M)
-        end
+        ## new chain: (re)size the output for M iterations
+        prepare_out!(out, input.params)
         ## run new chain
         dpm_sampler = set_sampler(input.params.model)
         out_tup = dpm_sampler(state, input, out, test=test, rng=rng)
@@ -300,7 +296,7 @@ function dpm_dump!(state::GibbsState, input::GibbsInput, out::GibbsOut;
         save(filename, save_data)
     end
     ## 3. run sampler with empty out
-    out = GibbsOut(input.params.M)
+    out = GibbsOut(input.params)
     GC.gc()
     state.state_sampler.batch_n += 1
     state.state_sampler.batch_1 += state.state_sampler.batch_m # increment starting point
@@ -367,6 +363,7 @@ function dpm_combine_outputs(outputs::Dict)
         append!(combined_out.out_data, batch_out.out_data)
         append!(combined_out.out_dp, batch_out.out_dp)
         append!(combined_out.out_theta, batch_out.out_theta)
+        append!(combined_out.out_labels, batch_out.out_labels)
     end
     
     return combined_out
