@@ -65,4 +65,41 @@ end
     end
 end
 
+@testset "Fix 5: label probabilities in log space" begin
+    lse = CausalMixtures.logsumexp
+    @test lse([log(1.0), log(2.0), log(3.0)]) ≈ log(6.0)
+    @test lse([-1e4, -1e4]) ≈ -1e4 + log(2)
+    @test lse([1e4, 1e4]) ≈ 1e4 + log(2)
+    @test lse([-Inf, 0.0]) == 0.0
+
+    ## extreme log weights: exp() underflows to 0 for all of them, but the ratios are fine
+    seed_global!()
+    logw = [-2e4, -2e4 + log(3), -3e4]
+    draws = [CausalMixtures.sample_logweights(logw) for _ in 1:40_000]
+    @test all(in((1, 2)), draws)
+    @test means_match(Float64.(draws .== 2), [0.75])
+    @test_throws ErrorException CausalMixtures.sample_logweights([-Inf, -Inf])
+    @test_throws ErrorException CausalMixtures.sample_logweights([0.0, NaN])
+
+    ## every label sampler survives a unit whose latent data sit far from all components
+    data = generate_hedonic_data(60, 4321)
+    raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
+    for model in ("dpm", "fmn", "blocked", "marginal")
+        seed_global!()
+        priors = setup_default_priors(data.true_params.ktot, J=3)
+        params = CausalMixtures.InputParams(M=1, verbose=false, model=model)
+        state, input, out = CausalMixtures.dpm_init(raw, priors, params)
+        state.state_data.y1[1] = 1e4
+        state.state_data.y0[1] = -1e4
+        update! = Dict("dpm" => CausalMixtures.update_labels!,
+                       "fmn" => CausalMixtures.update_fmn_labels!,
+                       "blocked" => CausalMixtures.update_blocked_labels!,
+                       "marginal" => CausalMixtures.update_marginal_labels!)[model]
+        state = update!(state, input)
+        labs = [state.state_dp.labels[i] for i in 1:input.dims.n]
+        @test all(l -> l >= 1, labs)
+        @test sum(values(state.state_dp.njs)) == input.dims.n
+    end
+end
+
 end # Phase 1 fixes

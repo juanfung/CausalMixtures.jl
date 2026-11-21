@@ -116,21 +116,18 @@ function sample_label!(state::GibbsState, input::GibbsInput, i::Int64)
     ## Prob(label i = existing component)
     Hi = input.data.Hmat[vcat(i, i+input.dims.n, i+2*input.dims.n), :] # 3 x ktot
     yi = [state.state_data.dstar[i], state.state_data.y1[i], state.state_data.y0[i]] # 3 x 1
-    w = Array{Float64}(undef, state.state_dp.J)
+    ## log weights; the common factor 1/zdenom cancels
+    logw = Array{Float64}(undef, state.state_dp.J)
     @inbounds for j in 1:state.state_dp.J
-        w[j] = state.state_dp.njs[j] * exp( prob_theta(state.state_theta[j], Hi, yi) ) / state.state_sampler.zdenom
+        logw[j] = log( state.state_dp.njs[j] ) + prob_theta(state.state_theta[j], Hi, yi)
     end
     
     ## Prob(label i = new component)
     theta_j = sample_new_theta(input.priors.prior_theta, state, Hi, yi)
-    w_new = state.state_dp.alpha * exp( prob_theta(theta_j, Hi, yi) ) / state.state_sampler.zdenom    
-    
-    ## combine and normalize probabilities
-    push!(w, w_new)
-    rmul!(w, 1/sum(w))
+    push!(logw, log( state.state_dp.alpha ) + prob_theta(theta_j, Hi, yi))
     
     ## sample component
-    ji = rand( Distributions.Categorical(w) )
+    ji = sample_logweights(logw)
     state.state_dp.labels[i] = ji
     ## setindex!(state.state_dp.labels, ji, i)
     
@@ -371,14 +368,12 @@ end
 function sample_fmn_label!(state::GibbsState, input::GibbsInput, i::Int64)    
     Hi = input.data.Hmat[vcat(i, i+input.dims.n, i+2*input.dims.n), :] # 3 x ktot
     yi = [state.state_data.dstar[i], state.state_data.y1[i], state.state_data.y0[i]] # 3 x 1
-    w = Array{Float64}(undef, state.state_dp.J)
-    @inbounds for j in 1:state.state_dp.J        
-        w[j] = ( state.state_dp.njs[j] + state.state_dp.alpha ) *
-        exp( prob_theta(state.state_theta[j], Hi, yi) ) / state.state_sampler.zdenom
-    end    
-    rmul!(w, 1/sum(w))    
+    logw = Array{Float64}(undef, state.state_dp.J)
+    @inbounds for j in 1:state.state_dp.J
+        logw[j] = log( state.state_dp.njs[j] + state.state_dp.alpha ) + prob_theta(state.state_theta[j], Hi, yi)
+    end
     ## sample component
-    ji = rand( Distributions.Categorical(w) )
+    ji = sample_logweights(logw)
     state.state_dp.labels[i] = ji    
     ## update counts
     state.state_dp.njs[ji] +=  1
@@ -453,16 +448,15 @@ end
 function sample_blocked_label!(state::GibbsState, input::GibbsInput, i::Int64)
     Hi = input.data.Hmat[vcat(i, i+input.dims.n, i+2*input.dims.n), :]
     yi = [state.state_data.dstar[i], state.state_data.y1[i], state.state_data.y0[i]]
-    w = Array{Float64}(undef, input.priors.prior_dp.J)
+    logw = Array{Float64}(undef, input.priors.prior_dp.J)
     # remove i from current component
     state.state_dp.njs[state.state_dp.labels[i]] -= 1
-    ## 1. compute Pr(label i = j)
+    ## 1. compute log Pr(label i = j)
     @inbounds for j in 1:length(state.state_dp.njs)
-        w[j] = state.state_dp.ws[j].w * exp( prob_theta(state.state_theta[j], Hi, yi) ) #/ state.state_sampler.zdenom
+        logw[j] = log( state.state_dp.ws[j].w ) + prob_theta(state.state_theta[j], Hi, yi)
     end
-    rmul!(w, 1/sum(w))
     ## 2. sample ji
-    ji = rand( Distributions.Categorical(w) )
+    ji = sample_logweights(logw)
     state.state_dp.labels[i] = ji
     ## update counts
     state.state_dp.njs[ji] += 1
@@ -654,25 +648,22 @@ function sample_marginal_label!(state::GibbsState, input::GibbsInput, i::Int64)
     yi = [state.state_data.dstar[i], state.state_data.y1[i], state.state_data.y0[i]] # 3 x 1
     
     ## compute probabilities for all J components
-    w = Array{Float64}(undef, input.priors.prior_dp.J)
+    logw = Array{Float64}(undef, input.priors.prior_dp.J)
     @inbounds for j in 1:input.priors.prior_dp.J
         if state.state_dp.njs[j] > 0
             ## existing component with data
-            w[j] = state.state_dp.njs[j] * exp(prob_theta(state.state_theta[j], Hi, yi))
+            logw[j] = log(state.state_dp.njs[j]) + prob_theta(state.state_theta[j], Hi, yi)
         else
             ## empty component - sample from prior
             theta_j = sample_new_theta(input.priors.prior_theta, state, Hi, yi)
-            w[j] = (state.state_dp.alpha / input.priors.prior_dp.J) * exp(prob_theta(theta_j, Hi, yi))
+            logw[j] = log(state.state_dp.alpha / input.priors.prior_dp.J) + prob_theta(theta_j, Hi, yi)
             ## store the sampled theta for potential use
             state.state_theta[j] = theta_j
         end
     end
     
-    ## normalize probabilities
-    rmul!(w, 1/sum(w))
-    
     ## sample new component
-    ji_new = rand(Distributions.Categorical(w))
+    ji_new = sample_logweights(logw)
     state.state_dp.labels[i] = ji_new
     
     ## update component count

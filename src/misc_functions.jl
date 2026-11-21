@@ -38,6 +38,21 @@ function NobileWishart(nu::Int64, V::Array{Float64})
 end
 
 
+## log(sum(exp.(logw))) without overflow or underflow
+function logsumexp(logw::AbstractVector{<:Real})
+    m = maximum(logw)
+    isfinite(m) || return m
+    return m + log(sum(x -> exp(x - m), logw))
+end
+
+## sample an index with probability proportional to exp.(logw), computed stably
+function sample_logweights(logw::AbstractVector{<:Real})
+    p = exp.(logw .- logsumexp(logw))
+    all(isfinite, p) || error("invalid label log weights: $(logw)")
+    return rand( Distributions.Categorical(p ./ sum(p)) )
+end
+
+
 ## sample truncated normals at 0, given d = {0, 1}
 function truncnorm(mu::Array, sigma::Array, d::Array)
     
