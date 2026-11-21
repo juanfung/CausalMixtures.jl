@@ -81,4 +81,26 @@ end
     end
 end
 
+@testset "prior_draw: one forward draw of the generative model" begin
+    rng = test_rng()
+    n = 30
+    X = hcat(ones(n), randn(rng, n)); W = hcat(X, randn(rng, n))
+    for sl in (:cluster, :common), part in (:crp, :stick)
+        s = PriorSpec(slopes=sl, sd_intercept=1, sd_intercept_d=.5, sd_probit=.5, sd_outcome=.5,
+                      rho=10, r=.153, alpha_shape=2.0, alpha_rate=2.0)
+        r = prior_draw(s, X, W; rng=rng, partition=part, J=7)
+        K = length(r.counts)
+        part == :stick ? (@test K == 7) : (@test all(>(0), r.counts))
+        @test r.counts == [count(==(j), r.labels) for j in 1:K]
+        @test r.d == Int.(r.z[:, 1] .> 0)
+        @test r.y == ifelse.(r.d .== 1, r.z[:, 2], r.z[:, 3])
+        @test all(S -> S[1, 1] == 1.0, r.Sigma)
+        if sl == :common
+            @test all(j -> r.gam[j][2:end] == r.slopes[1] && r.b1[j][2:end] == r.slopes[2], 1:K)
+        else
+            @test isempty(r.slopes[1])
+        end
+    end
+end
+
 end # Prior predictive simulator

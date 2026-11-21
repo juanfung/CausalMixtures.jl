@@ -11,7 +11,7 @@
 ## slopes = :common:  only the three intercepts are drawn per cluster; the slopes are
 ##                    drawn once and shared by all clusters.
 
-export PriorSpec, prior_predictive, g0_V0, draw_sigmas, g0_logpredictive, crp_num_clusters
+export PriorSpec, prior_predictive, prior_draw, g0_V0, draw_sigmas, g0_logpredictive, crp_num_clusters
 
 """
     PriorSpec(; name, slopes=:cluster, sd_intercept, sd_intercept_d=sd_intercept, sd_probit,
@@ -103,9 +103,77 @@ crp_num_clusters(s::PriorSpec, n::Integer; reps::Integer=10_000, rng::AbstractRN
     [length(_crp(rng, n, _draw_alpha(rng, s))[2]) for _ in 1:reps]
 
 """
+    prior_draw(spec, X, W; rng, partition=:crp, J=20) -> NamedTuple
+
+One draw of everything in the generative model, for n = size(X, 1) units with covariates X
+(n x kx) and W (n x kw), intercepts in column 1:
+- `alpha`, `labels` (1:K), `counts`;
+- per component j: `gam[j]`, `b1[j]`, `b0[j]` (full coefficient vectors, intercept first) and
+  `Sigma[j]`; under :common the slopes are shared and also returned as `slopes =
+  (gamma slopes, beta1 slopes, beta0 slopes)` (empty vectors under :cluster);
+- per unit: `z` (n x 3: d*, y1, y0), `d = 1{d* > 0}` and the observed outcome `y`.
+
+`partition = :crp`: c ~ CRP(alpha), K = number of clusters. `partition = :stick`: the truncated
+stick-breaking prior of the blocked sampler, v_j ~ Beta(1, alpha) for j < J, v_J = 1, and
+c_i ~ Categorical(w); all K = J components get parameters, occupied or not.
+Independent of the samplers' own prior draws (used by the Geweke tests).
+"""
+function prior_draw(s::PriorSpec, X::AbstractMatrix, W::AbstractMatrix;
+                    rng::AbstractRNG=Random.default_rng(), partition::Symbol=:crp, J::Integer=20)
+    n, kx = size(X)
+    kw = size(W, 2)
+    size(W, 1) == n || throw(DimensionMismatch("X and W must have the same number of rows"))
+    rhoR = s.rho * s.R
+    slopes(sd, k) = sd .* randn(rng, k)
+    alpha = _draw_alpha(rng, s)
+    if partition == :crp
+        labels, counts = _crp(rng, n, alpha)
+    elseif partition == :stick
+        v = [j < J ? rand(rng, Beta(1, alpha)) : 1.0 for j in 1:J]
+        w = [v[j] * prod(1 .- v[1:j-1]) for j in 1:J]
+        labels = [rand(rng, Categorical(w ./ sum(w))) for _ in 1:n]
+        counts = [count(==(j), labels) for j in 1:J]
+    else
+        throw(ArgumentError("partition must be :crp or :stick"))
+    end
+    K = length(counts)
+    ## shared slopes for :common (drawn in both modes, to keep one random stream)
+    g_sl, b1_sl, b0_sl = slopes(s.sd_probit, kw - 1), slopes(s.sd_outcome, kx - 1), slopes(s.sd_outcome, kx - 1)
+    shared = s.slopes == :common ? (copy(g_sl), copy(b1_sl), copy(b0_sl)) : (Float64[], Float64[], Float64[])
+    gam = Vector{Vector{Float64}}(undef, K)
+    b1 = Vector{Vector{Float64}}(undef, K)
+    b0 = Vector{Vector{Float64}}(undef, K)
+    Sigma = Vector{Matrix{Float64}}(undef, K)
+    L = Vector{Matrix{Float64}}(undef, K)
+    for j in 1:K
+        a = [s.sd_intercept_d, s.sd_intercept, s.sd_intercept] .* randn(rng, 3)
+        if s.slopes == :cluster
+            g_sl, b1_sl, b0_sl = slopes(s.sd_probit, kw - 1), slopes(s.sd_outcome, kx - 1), slopes(s.sd_outcome, kx - 1)
+        end
+        gam[j] = vcat(a[1], g_sl); b1[j] = vcat(a[2], b1_sl); b0[j] = vcat(a[3], b0_sl)
+        Sigma[j] = NobileWishart(rng, s.rho, rhoR)
+        L[j] = cholesky(Symmetric(Sigma[j])).L
+    end
+    z = Matrix{Float64}(undef, n, 3)
+    for i in 1:n
+        j = labels[i]
+        x = view(X, i, :); w = view(W, i, :)
+        e = L[j] * randn(rng, 3)
+        z[i, 1] = dot(w, gam[j]) + e[1]
+        z[i, 2] = dot(x, b1[j]) + e[2]
+        z[i, 3] = dot(x, b0[j]) + e[3]
+    end
+    d = Int.(z[:, 1] .> 0)
+    y = ifelse.(d .== 1, z[:, 2], z[:, 3])
+    return (alpha=alpha, labels=labels, counts=counts, gam=gam, b1=b1, b0=b0, Sigma=Sigma,
+            slopes=shared, z=z, d=d, y=y)
+end
+
+"""
     prior_predictive(spec, X, W; reps=1000, rng) -> NamedTuple
 
-Simulate `reps` data sets of size n = size(X, 1) from the generative model. Returns
+Simulate `reps` data sets of size n = size(X, 1) from the generative model (`prior_draw`).
+Returns
 - `k`, `alpha`: clusters and concentration per replicate;
 - `prop`: every unit's propensity Phi(w_i' gamma_{c_i}), all replicates pooled;
 - per cluster draw (pooled over replicates): `s22`, `s33` (within-cluster Var(y1), Var(y0)),
@@ -117,58 +185,25 @@ Simulate `reps` data sets of size n = size(X, 1) from the generative model. Retu
 """
 function prior_predictive(s::PriorSpec, X::AbstractMatrix, W::AbstractMatrix;
                           reps::Integer=1000, rng::AbstractRNG=Random.default_rng())
-    n, kx = size(X)
-    kw = size(W, 2)
-    size(W, 1) == n || throw(DimensionMismatch("X and W must have the same number of rows"))
     xbar = vec(mean(X, dims=1))
-    rhoR = s.rho * s.R
     ks, alphas = Int[], Float64[]
     prop = Float64[]
     s22, s33, mu1, mu0, effect = Float64[], Float64[], Float64[], Float64[], Float64[]
     cluster_prop = Float64[]
     sd_y, share_treated = Float64[], Float64[]
-    slopes(sd, k) = sd .* randn(rng, k)
     for _ in 1:reps
-        alpha = _draw_alpha(rng, s)
-        labels, counts = _crp(rng, n, alpha)
-        k = length(counts)
-        push!(ks, k); push!(alphas, alpha)
-        ## shared slopes for :common
-        g_sl, b1_sl, b0_sl = slopes(s.sd_probit, kw - 1), slopes(s.sd_outcome, kx - 1), slopes(s.sd_outcome, kx - 1)
-        gam = Vector{Vector{Float64}}(undef, k)
-        b1 = Vector{Vector{Float64}}(undef, k)
-        b0 = Vector{Vector{Float64}}(undef, k)
-        L = Vector{Matrix{Float64}}(undef, k)
-        for j in 1:k
-            a = [s.sd_intercept_d, s.sd_intercept, s.sd_intercept] .* randn(rng, 3)
-            if s.slopes == :cluster
-                g_sl, b1_sl, b0_sl = slopes(s.sd_probit, kw - 1), slopes(s.sd_outcome, kx - 1), slopes(s.sd_outcome, kx - 1)
-            end
-            gam[j] = vcat(a[1], g_sl); b1[j] = vcat(a[2], b1_sl); b0[j] = vcat(a[3], b0_sl)
-            Sig = NobileWishart(rng, s.rho, rhoR)
-            L[j] = cholesky(Symmetric(Sig)).L
-            push!(s22, Sig[2, 2]); push!(s33, Sig[3, 3])
-            push!(mu1, dot(xbar, b1[j])); push!(mu0, dot(xbar, b0[j]))
-            push!(effect, dot(xbar, b1[j] - b0[j]))
-            ## the cluster's mean propensity over all n covariate rows
-            push!(cluster_prop, mean(cdf.(Normal(), W * gam[j])))
+        r = prior_draw(s, X, W; rng=rng)
+        push!(ks, length(r.counts)); push!(alphas, r.alpha)
+        for j in eachindex(r.counts)
+            push!(s22, r.Sigma[j][2, 2]); push!(s33, r.Sigma[j][3, 3])
+            push!(mu1, dot(xbar, r.b1[j])); push!(mu0, dot(xbar, r.b0[j]))
+            push!(effect, dot(xbar, r.b1[j] - r.b0[j]))
+            push!(cluster_prop, mean(cdf.(Normal(), W * r.gam[j])))
         end
-        yobs = Vector{Float64}(undef, n)
-        ntreat = 0
-        for i in 1:n
-            j = labels[i]
-            x = view(X, i, :); w = view(W, i, :)
-            idx = dot(w, gam[j])
-            push!(prop, cdf(Normal(), idx))
-            e = L[j] * randn(rng, 3)
-            dstar = idx + e[1]
-            if dstar > 0
-                yobs[i] = dot(x, b1[j]) + e[2]; ntreat += 1
-            else
-                yobs[i] = dot(x, b0[j]) + e[3]
-            end
+        for i in eachindex(r.labels)
+            push!(prop, cdf(Normal(), dot(view(W, i, :), r.gam[r.labels[i]])))
         end
-        push!(sd_y, std(yobs)); push!(share_treated, ntreat / n)
+        push!(sd_y, std(r.y)); push!(share_treated, mean(r.d))
     end
     return (k=ks, alpha=alphas, prop=prop, s22=s22, s33=s33, mu1=mu1, mu0=mu0, effect=effect,
             cluster_prop=cluster_prop, sd_y=sd_y, share_treated=share_treated)
