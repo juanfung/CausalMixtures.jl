@@ -45,4 +45,25 @@ using .TestHelpers
     @test d ≈ b
 end
 
+@testset "acf_var / acf_var2 sum lags >= 1 only" begin
+    ## AR(1) x_t = phi x_{t-1} + e_t has integrated autocorrelation time tau = (1 + phi)/(1 - phi),
+    ## so the variance of the mean is var(x) tau / n.
+    rng = test_rng()
+    n = 200_000
+    for phi in (0.0, 0.5, 0.7)
+        x = zeros(n)
+        x[1] = randn(rng) / sqrt(1 - phi^2)
+        for t in 2:n
+            x[t] = phi * x[t-1] + randn(rng)
+        end
+        tau = (1 + phi) / (1 - phi)
+        tau1 = CausalMixtures.acf_var(x) * n / var(x)
+        tau2 = CausalMixtures.acf_var2(x) * n / var(x)
+        @test isapprox(tau1, tau; rtol=0.08)
+        @test isapprox(tau2, tau; rtol=0.08)
+    end
+    ## the old formula counted lag 0 twice, giving tau + 2 (3 instead of 1 for white noise),
+    ## far outside the tolerance above
+end
+
 end # Phase 1 follow-ups

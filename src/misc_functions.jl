@@ -153,12 +153,37 @@ rand_cdf(a::Vector{Float64}) = StatsBase.ecdf(a)
 #rand_pdf(a::Vector{Float64}) = KernelDensity.kde(a)
 
 
-## compute Monte Carlo variance for scalar MCMC draws:
-## 1. MC variance using autocorrelation function
-acf_var(a::Vector{Float64}) = var(a)*( 1 + 2*sum(StatsBase.autocor(a)) )/length(a)
+## compute Monte Carlo variance for scalar MCMC draws, var(a) * tau / n, where
+## tau = 1 + 2 * sum_{k>=1} rho_k is the integrated autocorrelation time.
+## (StatsBase.autocor includes lag 0, which must not enter the sum.)
 
+## 1. MC variance using autocorrelation function, lags 1:L with StatsBase's default
+##    window L = min(n - 1, round(10 log10 n))
+function acf_var(a::Vector{Float64})
+    n = length(a)
+    L = min(n - 1, round(Int, 10*log10(n)))
+    return var(a)*( 1 + 2*sum(StatsBase.autocor(a, 1:L)) )/n
+end
 
-acf_var2(a::Vector{Float64}) = var(a)*( 1 + 2*sum(StatsBase.autocor(a, 0:(length(a)-1))) )/length(a)
+## 1b. MC variance with Geyer's (1992) initial positive sequence: tau = -1 + 2 sum_{k=0}^{K} G_k,
+##     G_k = rho_{2k} + rho_{2k+1}, stopping before the first G_k <= 0. Summing every lag up to
+##     n - 1 instead is useless: those sample autocorrelations sum to exactly -1/2, giving 0.
+function acf_var2(a::Vector{Float64}; block::Int=64)
+    n = length(a)
+    tau = -1.0
+    lag0 = 0
+    while lag0 + 1 <= n - 1
+        lags = lag0:min(lag0 + 2*block - 1, n - 1)
+        r = StatsBase.autocor(a, collect(lags))
+        for k in 1:2:(length(r) - 1)
+            G = r[k] + r[k+1]
+            G <= 0 && return var(a)*tau/n
+            tau += 2G
+        end
+        lag0 = last(lags) + 1 - (isodd(length(lags)) ? 1 : 0)
+    end
+    return var(a)*tau/n
+end
 
 
 ## 2. MC variance by batching
