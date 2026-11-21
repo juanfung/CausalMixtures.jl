@@ -98,7 +98,7 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
         pb = priors.prior_theta.prior_beta
         priors = InputPriors(priors.prior_dp,
                              PriorTheta(PriorBeta(pb.mu, inv(pb.Vcov), true, pb.Vcov, pb.Lcov),
-                                        priors.prior_Sigma))
+                                        priors.prior_theta.prior_Sigma))
     end
 
     # ADDED: Auto-fix J=1 for gaussian sampler

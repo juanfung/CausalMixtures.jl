@@ -128,4 +128,29 @@ end
     end
 end
 
+@testset "Fix 10: init with a covariance prior (Vinv = false)" begin
+    data = generate_hedonic_data(80, 99)
+    raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
+    K = data.true_params.ktot
+    V0 = Matrix(Diagonal(collect(1.0:K))) + 0.1 * ones(K, K)
+    R = Matrix(Diagonal([1/7, 1.5, 2.5]))
+    priors = CausalMixtures.InputPriors(CausalMixtures.PriorDP(J=4, alpha=1.0),
+                 CausalMixtures.PriorTheta(CausalMixtures.PriorBeta(mu=fill(0.5, K), V=V0, Vinv=false),
+                                           CausalMixtures.PriorSigma(rho=7, R=R)))
+    for model in ("dpm", "blocked")
+        seed_global!()
+        params = CausalMixtures.InputParams(M=2, verbose=false, model=model)
+        state, input, out = CausalMixtures.dpm_init(raw, priors, params)
+        pb = input.priors.prior_theta.prior_beta
+        @test pb.Vinv
+        @test pb.V ≈ inv(V0)
+        @test pb.Vcov == V0
+        @test state.state_sampler.Vmu ≈ inv(V0) * fill(0.5, K)
+        @test input.priors.prior_theta.prior_Sigma.rho == 7
+        @test input.priors.prior_theta.prior_Sigma.R == R
+        state, input, out = CausalMixtures.dpm!(state, input, out)
+        @test length(out.out_theta) == 2
+    end
+end
+
 end # Phase 1 fixes
