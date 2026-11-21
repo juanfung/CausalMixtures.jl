@@ -123,7 +123,7 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     ## sample selection outcome
     dstar = zeros(n)
     @inbounds for i in 1:n
-        dstar[i] = rand( TruncatedNormal(0, 1, lower[i], upper[i]) )
+        dstar[i] = rand( truncated(Normal(0, 1), lower[i], upper[i]) )
     end
     ## initialize potential outcomes using observed data
     state_data = StateData(dstar=dstar, y1=copy(ys.a), y0=copy(ys.a))
