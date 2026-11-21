@@ -1,6 +1,6 @@
 # test/test_phase1_fixes.jl -- one testset per Phase 1 correctness fix
 # (docs/implementation_plan.md, section 03).
-using Test, CausalMixtures, LinearAlgebra, Random, Statistics, StatsModels
+using Test, CausalMixtures, LinearAlgebra, Random, Statistics, StatsModels, Distributions
 isdefined(Main, :TestHelpers) || include("TestHelpers.jl")
 using .TestHelpers
 
@@ -313,6 +313,36 @@ end
     @test_logs (:warn, r"deprecated") CausalMixtures.dpm_init(raw, priors,
         CausalMixtures.InputParams(M=1, verbose=false, model="marginal"))
     @test_logs CausalMixtures.dpm_init(raw, priors, CausalMixtures.InputParams(M=1, verbose=false, model="blocked"))
+end
+
+@testset "NobileWishart matches brute-force IW draws conditioned on sigma11 = 1" begin
+    ## Draw Sigma ~ InverseWishart(nu, S) (density ∝ |Σ|^{-(nu+4)/2} exp(-tr(S Σ^{-1})/2)),
+    ## keep draws with |sigma11 - 1| < 0.02, and compare with NobileWishart(nu, S).
+    ## Uses Distributions' sampler, independent of NobileWishart's Bartlett construction.
+    entries(X) = [X[2, 2], X[3, 3], X[1, 2], X[1, 3], X[2, 3]]
+    settings = ((9, [5.0 1 -1; 1 4 0.5; -1 0.5 3]), (14, [10.0 3 -2; 3 8 1; -2 1 6]))
+    for (nu, S) in settings
+        rng = test_rng()
+        IW = InverseWishart(nu, S)
+        kept = Vector{Vector{Float64}}()
+        for _ in 1:1_500_000
+            X = rand(rng, IW)
+            abs(X[1, 1] - 1) < 0.02 && push!(kept, entries(X))
+        end
+        B = reduce(hcat, kept)'
+        seed_global!()
+        Nw = reduce(hcat, [entries(CausalMixtures.NobileWishart(nu, S)) for _ in 1:200_000])'
+        @test size(B, 1) > 25_000
+        @test all(x -> x[1, 1] == 1.0, (CausalMixtures.NobileWishart(nu, S) for _ in 1:10))
+        ## means and variances of sigma22, sigma33, sigma12, sigma13, sigma23
+        @test maximum(abs, two_sample_zscores(B, Nw)) < 4.5
+        sq(X) = (X .- mean(X, dims=1)) .^ 2
+        @test maximum(abs, two_sample_zscores(sq(B), sq(Nw))) < 4.5
+        ## power: a wrong degrees of freedom is detected
+        seed_global!()
+        Nw1 = reduce(hcat, [entries(CausalMixtures.NobileWishart(nu + 1, S)) for _ in 1:200_000])'
+        @test maximum(abs, two_sample_zscores(B, Nw1)) > 10
+    end
 end
 
 end # Phase 1 fixes

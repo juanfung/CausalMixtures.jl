@@ -10,7 +10,7 @@ module TestHelpers
 
 using Random, Statistics, LinearAlgebra
 
-export TEST_SEED, test_rng, seed_global!, ess_batch,
+export TEST_SEED, test_rng, seed_global!, ess_batch, two_sample_zscores,
        mean_zscores, cov_zscores, means_match, covs_match, moments_match
 
 "Default seed for statistical tests."
@@ -77,6 +77,18 @@ function cov_zscores(draws::AbstractVecOrMat, target::AbstractMatrix;
         z[a, b] = z[b, a] = (Statistics.mean(prod_ab) - target[a, b]) / se
     end
     return z
+end
+
+"""
+    two_sample_zscores(X, Y) -> Vector
+
+Column-wise z-scores for equal means of two independent samples X and Y
+(rows are draws): (mean X - mean Y) / sqrt(var X / nx + var Y / ny).
+"""
+function two_sample_zscores(X::AbstractVecOrMat, Y::AbstractVecOrMat)
+    A, B = _rows(X), _rows(Y)
+    se = sqrt.(vec(var(A, dims=1)) ./ size(A, 1) .+ vec(var(B, dims=1)) ./ size(B, 1))
+    return (vec(mean(A, dims=1)) .- vec(mean(B, dims=1))) ./ se
 end
 
 """
