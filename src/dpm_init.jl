@@ -92,15 +92,12 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     model = params.model
     
     ## collect all inputs
-    if priors.prior_theta.prior_beta.Vinv
-        ## convert to covariance
-        V = inv(priors.prior_theta.prior_beta.V)
-    else
-        ## save covariance and convert to precision
-        V = priors.prior_theta.prior_beta.V
-        ##prior_beta = PriorBeta(priors.prior_theta.prior_beta.mu, V\eye(ktot), true)
+    ## prior_beta.V is the precision from here on; prior_beta.Vcov and .Lcov hold the covariance V0
+    if !priors.prior_theta.prior_beta.Vinv
+        ## keep the given covariance and its factor, convert V to precision
+        pb = priors.prior_theta.prior_beta
         priors = InputPriors(priors.prior_dp,
-                             PriorTheta(PriorBeta(mu=priors.prior_theta.prior_beta.mu, V=inv(V), Vinv=true),
+                             PriorTheta(PriorBeta(pb.mu, inv(pb.Vcov), true, pb.Vcov, pb.Lcov),
                                         priors.prior_Sigma))
     end
 

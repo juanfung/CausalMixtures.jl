@@ -22,6 +22,9 @@ result = @testset "CausalMixtures.jl Tests" begin
     include("test_samplers.jl")
     include("test_simulation_utils.jl")
 
+    # Phase 1 correctness fixes
+    include("test_phase1_fixes.jl")
+
     # ... include other test files as needed
     
     # Integration tests

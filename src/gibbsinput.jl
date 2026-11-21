@@ -67,8 +67,16 @@ PriorDP(; J=2, alpha=1.0, alpha_shape=0.0, alpha_rate=0.0 ) = PriorDP(J, alpha, 
 
 struct PriorBeta
     mu::Vector{Float64} # prior mean
-    V::Matrix{Float64} # prior precision
-    Vinv::Bool # if true, precision; else, covariance
+    V::Matrix{Float64} # prior precision (after dpm_init); as given by the user before
+    Vinv::Bool # if true, V is a precision; else, a covariance
+    Vcov::Matrix{Float64} # prior covariance V0 (always a covariance)
+    Lcov::LowerTriangular{Float64,Matrix{Float64}} # lower Cholesky factor of V0, for prior draws
+end
+
+## covariance and its Cholesky factor from V, which is a precision if Vinv is true
+function PriorBeta(mu::AbstractVector, V::AbstractMatrix, Vinv::Bool)
+    Vcov = Vinv ? Matrix(Symmetric(inv(Symmetric(Matrix{Float64}(V))))) : Matrix{Float64}(V)
+    return PriorBeta(mu, V, Vinv, Vcov, cholesky(Symmetric(Vcov)).L)
 end
 
 PriorBeta(; mu=ones(2), V=Matrix(1.0I, 2, 2), Vinv=true) = PriorBeta(mu, V, Vinv)
