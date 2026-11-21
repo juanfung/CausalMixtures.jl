@@ -47,7 +47,9 @@ end
     end
     ## all slopes and intercepts zero: every propensity is exactly 0.5
     s0 = PriorSpec(sd_intercept=0.0, sd_probit=0.0, sd_outcome=0.0)
-    @test all(==(0.5), prior_predictive(s0, X, W; reps=5, rng=rng).prop)
+    pp0 = prior_predictive(s0, X, W; reps=5, rng=rng)
+    @test all(==(0.5), pp0.prop)
+    @test all(==(0.5), pp0.cluster_prop)
 end
 
 @testset "g0_logpredictive matches brute-force Monte Carlo over beta and Sigma" begin
@@ -56,7 +58,7 @@ end
     w = [1.0, -0.5, 1.2]
     z = [0.4, 1.1, -0.6]
     for slopes in (:cluster, :common)
-        s = PriorSpec(slopes=slopes, sd_intercept=0.8, sd_probit=0.6, sd_outcome=0.5, rho=7, r=0.4)
+        s = PriorSpec(slopes=slopes, sd_intercept=0.8, sd_intercept_d=0.5, sd_probit=0.6, sd_outcome=0.5, rho=7, r=0.4)
         b = slopes == :common ? [0.3, -0.2, 0.5, 0.1, -0.4, 0.2] : nothing
         sig = draw_sigmas(s, 4000; rng=rng)
         lp = g0_logpredictive(s, z, x, w, sig; b=b)
@@ -70,7 +72,7 @@ end
                 if slopes == :cluster
                     m = H * (v .* randn(rng, length(v)))
                 else
-                    m = [dot(w[2:end], b[1:2]), dot(x[2:end], b[3:4]), dot(x[2:end], b[5:6])] .+ 0.8 .* randn(rng, 3)
+                    m = [dot(w[2:end], b[1:2]), dot(x[2:end], b[3:4]), dot(x[2:end], b[5:6])] .+ [0.5, 0.8, 0.8] .* randn(rng, 3)
                 end
                 acc += pdf(d, z - m)
             end

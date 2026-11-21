@@ -14,17 +14,19 @@
 export PriorSpec, prior_predictive, g0_V0, draw_sigmas, g0_logpredictive, crp_num_clusters
 
 """
-    PriorSpec(; name, slopes=:cluster, sd_intercept, sd_probit, sd_outcome, rho, r=2.0,
-              R=diag(1/rho, r, r), alpha=1.0, alpha_shape=0.0, alpha_rate=0.0)
+    PriorSpec(; name, slopes=:cluster, sd_intercept, sd_intercept_d=sd_intercept, sd_probit,
+              sd_outcome, rho, r=2.0, R=diag(1/rho, r, r), alpha=1.0, alpha_shape=0.0, alpha_rate=0.0)
 
 A candidate base measure G0 and DP prior on the standardized scale. Intercepts, probit slopes
-and outcome slopes are independent N(0, sd^2). Sigma ~ NobileWishart(rho, rho*R). alpha is fixed
+and outcome slopes are independent N(0, sd^2); the selection-equation intercept has sd
+`sd_intercept_d` and the two outcome intercepts `sd_intercept`. Sigma ~ NobileWishart(rho, rho*R). alpha is fixed
 at `alpha` when `alpha_shape == 0`, and otherwise alpha ~ Gamma(alpha_shape, rate = alpha_rate).
 """
 struct PriorSpec
     name::String
     slopes::Symbol
     sd_intercept::Float64
+    sd_intercept_d::Float64
     sd_probit::Float64
     sd_outcome::Float64
     rho::Int
@@ -35,17 +37,18 @@ struct PriorSpec
 end
 
 function PriorSpec(; name::String="", slopes::Symbol=:cluster, sd_intercept::Real=1.0,
-                   sd_probit::Real=1.0, sd_outcome::Real=1.0, rho::Integer=6, r::Real=2.0,
+                   sd_intercept_d::Real=sd_intercept, sd_probit::Real=1.0, sd_outcome::Real=1.0, rho::Integer=6, r::Real=2.0,
                    R::AbstractMatrix=Matrix(Diagonal([1/rho, r, r])), alpha::Real=1.0,
                    alpha_shape::Real=0.0, alpha_rate::Real=0.0)
     slopes in (:cluster, :common) || throw(ArgumentError("slopes must be :cluster or :common"))
-    return PriorSpec(name, slopes, sd_intercept, sd_probit, sd_outcome, rho, Matrix{Float64}(R),
+    return PriorSpec(name, slopes, sd_intercept, sd_intercept_d, sd_probit, sd_outcome, rho, Matrix{Float64}(R),
                      alpha, alpha_shape, alpha_rate)
 end
 
 ## copy of a spec with some fields changed
 function PriorSpec(s::PriorSpec; kw...)
-    f = merge((name=s.name, slopes=s.slopes, sd_intercept=s.sd_intercept, sd_probit=s.sd_probit,
+    f = merge((name=s.name, slopes=s.slopes, sd_intercept=s.sd_intercept,
+               sd_intercept_d=s.sd_intercept_d, sd_probit=s.sd_probit,
                sd_outcome=s.sd_outcome, rho=s.rho, R=s.R, alpha=s.alpha,
                alpha_shape=s.alpha_shape, alpha_rate=s.alpha_rate), values(kw))
     return PriorSpec(; f...)
@@ -62,7 +65,7 @@ each block (the :cluster layout).
 """
 function g0_V0(s::PriorSpec, kx::Integer, kw::Integer)
     blk(sd) = vcat(s.sd_intercept^2, fill(sd^2, kx - 1))
-    return vcat(s.sd_intercept^2, fill(s.sd_probit^2, kw - 1), blk(s.sd_outcome), blk(s.sd_outcome))
+    return vcat(s.sd_intercept_d^2, fill(s.sd_probit^2, kw - 1), blk(s.sd_outcome), blk(s.sd_outcome))
 end
 
 ## Chinese restaurant process labels for n units
@@ -107,7 +110,9 @@ Simulate `reps` data sets of size n = size(X, 1) from the generative model. Retu
 - `prop`: every unit's propensity Phi(w_i' gamma_{c_i}), all replicates pooled;
 - per cluster draw (pooled over replicates): `s22`, `s33` (within-cluster Var(y1), Var(y0)),
   `mu1`, `mu0` (cluster means of y1, y0 at the covariate means xbar) and `effect`
-  (xbar'(beta1 - beta0));
+  (xbar'(beta1 - beta0)), `cluster_prop` (the cluster's mean propensity over all n covariate rows;
+  near 0 or 1 means a cluster that is almost all controls or all treated, whose missing arm is
+  identified only by the prior);
 - per replicate: `sd_y` (sd of the observed outcome), `share_treated`.
 """
 function prior_predictive(s::PriorSpec, X::AbstractMatrix, W::AbstractMatrix;
@@ -120,6 +125,7 @@ function prior_predictive(s::PriorSpec, X::AbstractMatrix, W::AbstractMatrix;
     ks, alphas = Int[], Float64[]
     prop = Float64[]
     s22, s33, mu1, mu0, effect = Float64[], Float64[], Float64[], Float64[], Float64[]
+    cluster_prop = Float64[]
     sd_y, share_treated = Float64[], Float64[]
     slopes(sd, k) = sd .* randn(rng, k)
     for _ in 1:reps
@@ -134,7 +140,7 @@ function prior_predictive(s::PriorSpec, X::AbstractMatrix, W::AbstractMatrix;
         b0 = Vector{Vector{Float64}}(undef, k)
         L = Vector{Matrix{Float64}}(undef, k)
         for j in 1:k
-            a = s.sd_intercept .* randn(rng, 3)
+            a = [s.sd_intercept_d, s.sd_intercept, s.sd_intercept] .* randn(rng, 3)
             if s.slopes == :cluster
                 g_sl, b1_sl, b0_sl = slopes(s.sd_probit, kw - 1), slopes(s.sd_outcome, kx - 1), slopes(s.sd_outcome, kx - 1)
             end
@@ -144,6 +150,8 @@ function prior_predictive(s::PriorSpec, X::AbstractMatrix, W::AbstractMatrix;
             push!(s22, Sig[2, 2]); push!(s33, Sig[3, 3])
             push!(mu1, dot(xbar, b1[j])); push!(mu0, dot(xbar, b0[j]))
             push!(effect, dot(xbar, b1[j] - b0[j]))
+            ## the cluster's mean propensity over all n covariate rows
+            push!(cluster_prop, mean(cdf.(Normal(), W * gam[j])))
         end
         yobs = Vector{Float64}(undef, n)
         ntreat = 0
@@ -163,7 +171,7 @@ function prior_predictive(s::PriorSpec, X::AbstractMatrix, W::AbstractMatrix;
         push!(sd_y, std(yobs)); push!(share_treated, ntreat / n)
     end
     return (k=ks, alpha=alphas, prop=prop, s22=s22, s33=s33, mu1=mu1, mu0=mu0, effect=effect,
-            sd_y=sd_y, share_treated=share_treated)
+            cluster_prop=cluster_prop, sd_y=sd_y, share_treated=share_treated)
 end
 
 """
@@ -195,7 +203,7 @@ function g0_logpredictive(s::PriorSpec, z::AbstractVector, x::AbstractVector, w:
         b === nothing && throw(ArgumentError(":common needs the shared slopes b"))
         bg, bb1, bb0 = b[1:kw-1], b[kw:kw+kx-2], b[kw+kx-1:end]
         m = [dot(w[2:end], bg), dot(x[2:end], bb1), dot(x[2:end], bb0)]
-        C = Diagonal(fill(s.sd_intercept^2, 3))
+        C = Diagonal([s.sd_intercept_d^2, s.sd_intercept^2, s.sd_intercept^2])
     end
     lps = [logpdf(MvNormal(m, Symmetric(Sig + C)), z) for Sig in sigmas]
     return logsumexp(lps) - log(length(lps))
