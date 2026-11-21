@@ -413,17 +413,15 @@ function compute_v(s::StateDP, j::Int64)
     return v
 end
 
-function compute_w(s::StateDP, j::Int64)
-    w = (j == 1) ? s.ws[j].v : s.ws[j].v * prod( map( val -> 1-val, take(values(s.ws), j-1) ) ).v
-    ##s.ws[j].w = j == 1? s.ws[j].v: s.ws[j].v * prod( map( val -> 1-val.v, take(values(s.ws), j-1) ) )
-    ## reduce(*, map(v->1-v, take(valus(d), j-1))).v
-    return w
+## w_j = v_j * prod_{l<j} (1 - v_l), using the already-updated v_1..v_{j-1}
+function compute_w(s::StateDP, j::Int64, v::Float64)
+    return (j == 1) ? v : v * prod( 1 - b.v for b in take(values(s.ws), j-1) )
 end
 
+## store a new BlockedWeights object: saved copies of earlier states must not see this update
 function update_ws!(s::StateDP, j::Int64)
-    get!(s.ws, j, BlockedWeights())
-    s.ws[j].v = compute_v(s, j)
-    s.ws[j].w = compute_w(s, j)
+    v = compute_v(s, j)
+    s.ws[j] = BlockedWeights(compute_w(s, j, v), v)
     return s
 end
 

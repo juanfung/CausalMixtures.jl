@@ -1,7 +1,8 @@
 ## --------------------------------------------------------------------------- #
 ## State
 
-mutable struct BlockedWeights
+## immutable, so a StateDP saved by update_out! cannot be changed by later updates
+struct BlockedWeights
     w::Float64
     v::Float64
     ##nj::Int64

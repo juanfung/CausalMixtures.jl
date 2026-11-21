@@ -153,4 +153,31 @@ end
     end
 end
 
+@testset "Fix P1: saved blocked weights do not alias across iterations" begin
+    data = generate_hedonic_data(100, 7)
+    raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
+    priors = setup_default_priors(data.true_params.ktot, J=6)
+    params = CausalMixtures.InputParams(M=20, verbose=false, model="blocked")
+    seed_global!()
+    state, input, out = CausalMixtures.dpm!(CausalMixtures.dpm_init(raw, priors, params)...)
+    M = params.M
+    ## saved weights must vary over iterations (before the fix all equalled the last iteration's)
+    v1 = [out.out_dp[m].ws[1].v for m in 1:M]
+    @test length(unique(v1)) == M
+    @test out.out_dp[M].ws[1].v == state.state_dp.ws[1].v
+    @test out.out_dp[1].ws[1].v != state.state_dp.ws[1].v
+    for m in 1:M
+        ws = out.out_dp[m].ws
+        v = [ws[j].v for j in 1:6]
+        w = [ws[j].w for j in 1:6]
+        ## stick-breaking identity holds within each saved iteration, and the weights sum to 1
+        @test w ≈ [v[j] * prod(1 .- v[1:j-1]) for j in 1:6]
+        @test sum(w) ≈ 1
+        @test v[6] == 1.0
+    end
+    ## the BlockedWeights algebra
+    b1, b2 = CausalMixtures.BlockedWeights(0.5, 0.25), CausalMixtures.BlockedWeights(0.125, 0.5)
+    @test (1 - b1).w == 0.5 && (1 - b1).v == 0.75
+end
+
 end # Phase 1 fixes
