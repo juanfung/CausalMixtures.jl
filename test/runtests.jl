@@ -1,5 +1,7 @@
 # runtests.jl
 using Test
+include("TestHelpers.jl")
+using .TestHelpers
 
 println("Running CausalMixtures.jl Tests...")
 println("="^50)
@@ -10,6 +12,9 @@ result = @testset "CausalMixtures.jl Tests" begin
     include("testgibbsstate.jl")
     include("testgibbsout.jl")
     include("testCausalMixtures.jl")
+
+    # statistical test helpers
+    include("test_helpers.jl")
 
     # test functionality
     include("testgibbsppd.jl")
