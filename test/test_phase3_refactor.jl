@@ -1,5 +1,5 @@
 # test/test_phase3_refactor.jl -- Phase 3 state refactor (docs/implementation_plan.md, section 05)
-using Test, CausalMixtures, LinearAlgebra, Random, Statistics, StatsModels
+using Test, CausalMixtures, LinearAlgebra, Random, Statistics, StatsModels, Distributions, SparseArrays
 isdefined(Main, :TestHelpers) || include("TestHelpers.jl")
 using .TestHelpers
 
@@ -56,6 +56,73 @@ end
     @test dp.J == 2 && dp.njs == [count(==(j), dp.labels) for j in 1:2]
     @test state.state_theta[1] === th1 && state.state_theta[2] === th3
     @test all(j -> dp.members[j] == findall(==(j), dp.labels), 1:2)
+end
+
+@testset "kernels: dense design, block-identity precision, 3-d log density" begin
+    rng = test_rng()
+    data = generate_hedonic_data(40, 77)
+    raw = CausalMixtures.RawData(data.formulas.formula_y, @formula(D_obs ~ Z + X), data.df)
+    params = CausalMixtures.InputParams(M=1, scale_data=(true, true), verbose=false, model="blocked")
+    seed_global!()
+    state, input, _ = CausalMixtures.dpm_init(raw, setup_default_priors(2, 3, J=4), params)
+    n, kx, kz = input.dims.n, input.dims.kx, input.dims.kz
+    H = input.data.Hmat
+    @test input.data.X ≈ Matrix(H[(n+1):(2n), (kz+1):(kz+kx)])
+    @test input.data.W ≈ Matrix(H[1:n, 1:kz])
+    beta = randn(rng, kz + 2kx)
+    A = randn(rng, 3, 3); S = A * A' + I
+    S ./= S[1, 1]
+    c = CausalMixtures.Chol3(S)
+    @test [c.l11 0 0; c.l21 c.l22 0; c.l31 c.l32 c.l33] ≈ cholesky(S).L
+    for i in (1, 17, n)
+        Hi = Matrix(H[[i, i + n, i + 2n], :])
+        @test collect(CausalMixtures.unit_mean(input.data.X, input.data.W, beta, i)) ≈ Hi * beta
+        z = (randn(rng), randn(rng), randn(rng))
+        @test CausalMixtures.logpdf_unit(c, beta, input.data.X, input.data.W, z, i) ≈
+              logpdf(MvNormal(Hi * beta, S), collect(z))
+    end
+    ## H_j'(Sinv ⊗ I)H_j and H_j'(Sinv ⊗ I)z_j from cross-products match the dense kron build
+    idx = [2, 3, 5, 8, 13, 21, 34]
+    Hj = Matrix(H[vcat(idx, idx .+ n, idx .+ 2n), :])
+    Sinv = inv(S)
+    Wj, Xj = input.data.W[idx, :], input.data.X[idx, :]
+    @test CausalMixtures.design_precision(Sinv, Wj' * Wj, Wj' * Xj, Xj' * Xj) ≈ Hj' * kron(Sinv, I(length(idx))) * Hj
+    ## the latent-data conditionals are those of N3(H_i beta, Sigma)
+    lm = CausalMixtures.LatentMoments(S)
+    function gauss_cond(S, a, bs)
+        K = S[a, bs]' / S[bs, bs]
+        return K, S[a, a] - (K * S[bs, a])[1]
+    end
+    K, v = gauss_cond(S, 2, [1, 3]); @test [lm.c1d lm.c1y] ≈ K && lm.omega1 ≈ v
+    K, v = gauss_cond(S, 3, [1, 2]); @test [lm.c0d lm.c0y] ≈ K && lm.omega0 ≈ v
+    K, v = gauss_cond(S, 1, [2, 3]); @test [lm.sd1 lm.sd0] ≈ K && lm.omega_d ≈ v
+end
+
+@testset "update_theta! draws from the dense-build conditional of beta given Sigma" begin
+    ## fix Sigma by making NobileWishart's draw irrelevant: compare the beta draws' moments with the
+    ## dense formula given the Sigma that was drawn (beta | Sigma is exactly normal)
+    data = generate_hedonic_data(60, 3)
+    raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
+    params = CausalMixtures.InputParams(M=1, scale_data=(true, true), verbose=false, model="gaussian")
+    seed_global!()
+    state, input, _ = CausalMixtures.dpm_init(raw, setup_default_priors(2, 3, J=1), params)
+    n = input.dims.n
+    idx = collect(1:n)
+    H = Matrix(input.data.Hmat)
+    zv = vcat(state.state_data.dstar, state.state_data.y1, state.state_data.y0)
+    pb = input.priors.prior_theta.prior_beta
+    N = 20_000
+    B = zeros(N, input.dims.ktot); Z = zeros(N, input.dims.ktot)
+    for r in 1:N
+        CausalMixtures.update_theta!(state, input, 1, idx)
+        th = state.state_theta[1]
+        Sinv = inv(th.Sigma)
+        V = inv(H' * kron(Sinv, I(n)) * H + pb.V)
+        m = V * (H' * kron(Sinv, I(n)) * zv + pb.V * pb.mu)
+        Z[r, :] = cholesky(Symmetric(V)).L \ (th.beta - m)   # standard normal if the draw is right
+    end
+    @test maximum(abs, mean(Z, dims=1)) < 4.5 / sqrt(N)
+    @test cov(Z) ≈ I atol = 0.05
 end
 
 end # Phase 3 refactor

@@ -22,7 +22,7 @@ function dpm_gaussian!(state::GibbsState, input::GibbsInput, out::GibbsOut; test
         
         ## test using observed data as latent data?
         if test
-            state = update_theta!(state, input, 1, collect(1:input.dims.n), input.data.Hmat)
+            state = update_theta!(state, input, 1, 1:input.dims.n)
         else
             state = update_gaussian_params!(state, input)
         end

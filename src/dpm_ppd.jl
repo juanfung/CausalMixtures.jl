@@ -128,11 +128,7 @@ covariates `w`, in the column order of `input.data.xnames` and `input.data.zname
 (on the sampler's scale, so standardized if `scale_data` was set).
 """
 function mean_covariates(input::GibbsInput)
-    n, kx, kz = input.dims.n, input.dims.kx, input.dims.kz
-    H = input.data.Hmat
-    wbar = vec(mean(Matrix(H[1:n, 1:kz]), dims=1))
-    xbar = vec(mean(Matrix(H[(n+1):(2n), (kz+1):(kz+kx)]), dims=1))
-    return xbar, wbar
+    return vec(mean(input.data.X, dims=1)), vec(mean(input.data.W, dims=1))
 end
 
 """

@@ -1,4 +1,66 @@
 ## functions to update GibbsState
+##
+## Model: z_i = (d*_i, y1_i, y0_i)' = H_i beta_{c_i} + e_i, e_i ~ N3(0, Sigma_{c_i}), sigma11 = 1,
+## H_i = blockdiag(w_i', x_i', x_i'), beta = (gamma, beta1, beta0). The design is used through the
+## dense X (n x kx) and W (n x kz) in InputData: per-unit means are dot products with a row, and
+## a component's precision H_j'(Sigma^-1 ⊗ I)H_j is built from the Sigma-free cross-products
+## W_j'W_j, W_j'X_j, X_j'X_j (design_precision).
+
+## --------------------------------------------------------------------------- #
+## design helpers
+
+## positions of gamma, beta1, beta0 in beta = (gamma, beta1, beta0)
+@inline coef_blocks(kx::Integer, kz::Integer) = (1:kz, (kz+1):(kz+kx), (kz+kx+1):(kz+2kx))
+
+## the mean H_i beta = (w_i'gamma, x_i'beta1, x_i'beta0) of unit i
+@inline function unit_mean(X::AbstractMatrix{Float64}, W::AbstractMatrix{Float64},
+                           beta::AbstractVector{Float64}, i::Integer)
+    kx, kz = size(X, 2), size(W, 2)
+    md = 0.0
+    @inbounds for a in 1:kz
+        md += W[i, a] * beta[a]
+    end
+    m1 = 0.0
+    m0 = 0.0
+    @inbounds for a in 1:kx
+        x = X[i, a]
+        m1 += x * beta[kz + a]
+        m0 += x * beta[kz + kx + a]
+    end
+    return md, m1, m0
+end
+
+## latent data of unit i
+@inline unit_z(sd::StateData, i::Integer) = @inbounds (sd.dstar[i], sd.y1[i], sd.y0[i])
+
+## log N3(z_i | H_i beta, Sigma), given the Cholesky factor c of Sigma
+@inline function logpdf_unit(c::Chol3, beta::AbstractVector{Float64}, X, W, z::NTuple{3,Float64}, i::Integer)
+    md, m1, m0 = unit_mean(X, W, beta, i)
+    return logpdf3(c, z[1] - md, z[2] - m1, z[3] - m0)
+end
+
+## H'(Sinv ⊗ I)H for H = blockdiag(W, X, X), from WW = W'W, WX = W'X, XX = X'X
+function design_precision(Sinv::AbstractMatrix{Float64}, WW::AbstractMatrix{Float64},
+                          WX::AbstractMatrix{Float64}, XX::AbstractMatrix{Float64})
+    kz, kx = size(WX)
+    g, b1, b0 = coef_blocks(kx, kz)
+    P = Matrix{Float64}(undef, kz + 2kx, kz + 2kx)
+    @views begin
+        P[g, g] .= Sinv[1,1] .* WW
+        P[g, b1] .= Sinv[1,2] .* WX
+        P[g, b0] .= Sinv[1,3] .* WX
+        P[b1, g] .= Sinv[2,1] .* WX'
+        P[b0, g] .= Sinv[3,1] .* WX'
+        P[b1, b1] .= Sinv[2,2] .* XX
+        P[b1, b0] .= Sinv[2,3] .* XX
+        P[b0, b1] .= Sinv[3,2] .* XX
+        P[b0, b0] .= Sinv[3,3] .* XX
+    end
+    return P
+end
+
+## Cholesky factors of every component's Sigma, computed once per sweep
+component_chols(state_theta::StateTheta) = Chol3[Chol3(t.Sigma) for t in state_theta]
 
 ## --------------------------------------------------------------------------- #
 ## main sampler functions
@@ -10,12 +72,13 @@
 ## relabelling scan each time a component empties.
 function update_labels!(state::GibbsState, input::GibbsInput)
     dp = state.state_dp
+    chols = component_chols(state.state_theta)
     @inbounds for i in 1:input.dims.n
         ji = dp.labels[i]
         dp.labels[i] = 0 # remove i from component ji
         dp.njs[ji] -= 1
         ## sample component label
-        state = sample_label!(state, input, i)
+        state = sample_label!(state, input, i, chols)
     end
     compact_components!(state)
     return state
@@ -45,63 +108,32 @@ function compact_components!(state::GibbsState)
     return state
 end
 
-## sample new theta from prior predictive
-function sample_new_theta(prior_theta::PriorTheta, state::GibbsState,
-                          Hi::SparseMatrixCSC{Float64,Int64}, yi::Vector{Float64})
-    ## i. sample new Sigma
-    #Ui = yi - Hi*prior_theta.prior_beta.mu # 3 x 1
-    #Ui = Ui*Ui' + prior_theta.prior_Sigma.rho*prior_theta.prior_Sigma.R # 3 x 3    
-    #Sigma_j = NobileWishart(prior_theta.prior_Sigma.rho+1, Ui)
-    ## ii. sample new beta
-    #xb = *(Hi', Sigma_j\eye(3)) # ktot x 3
-    #vj = xb*Hi + prior_theta.prior_beta.V # ktot x ktot
-    #vj = vj\eye(vj)
-    #mj = *( vj, xb*yi + state.state_sampler.Vmu ) # ktot x 1
-    #beta_j = mj + chol(vj)'*randn(length(mj)) # ktot x 1
-    Sigma_j = sample_new_Sigma(prior_theta, Hi, yi)
-    beta_j = sample_new_beta(new_beta_cov(prior_theta, Hi, yi, Sigma_j)..., state.state_sampler.Vmu, yi)
+## sample new theta from its posterior given unit i's latent data z alone
+function sample_new_theta(p::PriorTheta, state::GibbsState, input::GibbsInput, i::Integer,
+                          z::NTuple{3,Float64})
+    X, W = input.data.X, input.data.W
+    ## i. Sigma ~ NobileWishart(rho + 1, u u' + rho R), u = z - H_i mu
+    md, m1, m0 = unit_mean(X, W, p.prior_beta.mu, i)
+    u = (z[1] - md, z[2] - m1, z[3] - m0)
+    U = [u[a] * u[b] for a in 1:3, b in 1:3] .+ p.prior_Sigma.rho .* p.prior_Sigma.R
+    Sigma_j = NobileWishart(p.prior_Sigma.rho + 1, U)
+    ## ii. beta ~ N(vj (H_i' Sinv z + V mu), vj), vj = (H_i' Sinv H_i + V)^-1
+    Sinv = inv(Sigma_j)
+    w = W[i, :]
+    x = X[i, :]
+    vj = inv(design_precision(Sinv, w * w', w * x', x * x') + p.prior_beta.V)
+    s1 = Sinv[1,1]*z[1] + Sinv[1,2]*z[2] + Sinv[1,3]*z[3]
+    s2 = Sinv[2,1]*z[1] + Sinv[2,2]*z[2] + Sinv[2,3]*z[3]
+    s3 = Sinv[3,1]*z[1] + Sinv[3,2]*z[2] + Sinv[3,3]*z[3]
+    mj = vj * (vcat(s1 .* w, s2 .* x, s3 .* x) .+ state.state_sampler.Vmu)
+    beta_j = mj + cholesky( Hermitian(vj) ).U' * randn(length(mj))
     return Theta(beta=beta_j, Sigma=Sigma_j)
 end
 
-function sample_new_Sigma(p::PriorTheta, Hi::SparseMatrixCSC{Float64,Int64}, yi::Vector{Float64})
-    ## i. sample new Sigma
-    Ui = yi - Hi*p.prior_beta.mu # 3 x 1
-    Ui = Ui*Ui' + p.prior_Sigma.rho*p.prior_Sigma.R # 3 x 3
-    ##if !isposdef(Ui) Ui += eps(Float64)*eye(3) end
-    ##if !isposdef(Ui) error("Ui not postive definite!")
-    Sigma_j = NobileWishart(p.prior_Sigma.rho+1, Ui)
-    return Sigma_j
-end
-
-function new_beta_cov(p::PriorTheta, Hi::SparseMatrixCSC{Float64,Int64}, yi::Vector{Float64}, S::Matrix{Float64})
-    #Hi_dense = Matrix(Hi) # 3 x ktot
-    #xb = Hi_dense' * inv(S) # ktot x 3
-    ##xb = Hi' \ cholesky(S) # ktot x 3
-    #vj = xb * Hi_dense + p.prior_beta.V # ktot x ktot
-    ##vj_inv = cholesky(vj) \ Matrix{Float64}(I, size(vj)...)
-    #vj_inv = inv(vj)
-    ## ORIGINAL ##
-    xb = *(Hi', inv(S)) # ktot x 3
-    vj = xb*Hi + p.prior_beta.V # ktot x ktot
-    return ( xb, inv(vj) )
-end
-
-function sample_new_beta(xb::Matrix{Float64}, vj::Matrix{Float64}, Vmu::Vector{Float64}, yi::Vector{Float64})
-    mj = *( vj, xb*yi + Vmu ) # ktot x 1 
-    return mj + cholesky( Hermitian(vj) ).U'*randn(length(mj)) # ktot x 1
-end
-
-## compute probability of theta
-function prob_theta(theta::Theta, Hi::SparseMatrixCSC{Float64,Int64}, yi::Vector{Float64})
-    w = logpdf( MvNormal( Hi*theta.beta, theta.Sigma), yi)
-end
-
 ## sample label for i
-function sample_label!(state::GibbsState, input::GibbsInput, i::Int64)
-    
-    ## Prob(label i = existing component)
-    Hi = input.data.Hmat[vcat(i, i+input.dims.n, i+2*input.dims.n), :] # 3 x ktot
-    yi = [state.state_data.dstar[i], state.state_data.y1[i], state.state_data.y0[i]] # 3 x 1
+function sample_label!(state::GibbsState, input::GibbsInput, i::Int64, chols::Vector{Chol3})
+    X, W = input.data.X, input.data.W
+    z = unit_z(state.state_data, i)
     ## log weights over the occupied components (empty slots get -Inf); the common factor
     ## 1/zdenom cancels
     dp = state.state_dp
@@ -110,32 +142,35 @@ function sample_label!(state::GibbsState, input::GibbsInput, i::Int64)
     free = 0
     @inbounds for j in 1:K
         if dp.njs[j] > 0
-            logw[j] = log( dp.njs[j] ) + prob_theta(state.state_theta[j], Hi, yi)
+            logw[j] = log( dp.njs[j] ) + logpdf_unit(chols[j], state.state_theta[j].beta, X, W, z, i)
         else
             logw[j] = -Inf
             free == 0 && (free = j)
         end
     end
-    
+
     ## Prob(label i = new component)
-    theta_j = sample_new_theta(input.priors.prior_theta, state, Hi, yi)
-    logw[K + 1] = log( dp.alpha ) + prob_theta(theta_j, Hi, yi)
-    
+    theta_j = sample_new_theta(input.priors.prior_theta, state, input, i, z)
+    chol_j = Chol3(theta_j.Sigma)
+    logw[K + 1] = log( dp.alpha ) + logpdf_unit(chol_j, theta_j.beta, X, W, z, i)
+
     ## sample component
     ji = sample_logweights(logw)
-    
+
     ## a new component goes into a free slot if there is one
     if ji == K + 1
         if free > 0
             ji = free
             state.state_theta[ji] = theta_j
+            chols[ji] = chol_j
         else
             push!(dp.njs, 0)
             push!(state.state_theta, theta_j)
+            push!(chols, chol_j)
         end
     end
     dp.labels[i] = ji
-    
+
     ## update counts
     dp.njs[ji] += 1
 
@@ -145,148 +180,111 @@ end
 
 ## update parameters {LatentData, Theta}
 function update_params!(state::GibbsState, input::GibbsInput)
-
-    @inbounds for j in 1:state.state_dp.J # k in keys(state.state_theta) or keys(state.state_dp.njs)
-        
+    @inbounds for j in 1:state.state_dp.J
         if state.state_dp.njs[j] == 0 continue end
-        
         idx = state.state_dp.members[j]
-        Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n), :] # 3nj x ktot
-        
         ## update theta
-        state = update_theta!(state, input, j, idx, Hj)
-        
-        ## update latent data        
-        state = update_latent!(state, input, j, idx, Hj)
-        
+        state = update_theta!(state, input, j, idx)
+        ## update latent data
+        state = update_latent!(state, input, j, idx)
     end
-    
     return state
-    
 end
 
-function update_theta!(state::GibbsState, input::GibbsInput, j::Int64, idx::Vector{Int64},
-                       Hj::SparseMatrixCSC{Float64,Int64}) ##T<:AbstractArray{Int64,1} UnitRange{Int64}
+## update theta_j = (beta_j, Sigma_j) given the latent data of its members idx:
+## Sigma_j | beta_j, then beta_j | Sigma_j
+function update_theta!(state::GibbsState, input::GibbsInput, j::Integer, idx::AbstractVector{<:Integer})
+    p = input.priors.prior_theta
+    kx, kz = input.dims.kx, input.dims.kz
+    g, b1, b0 = coef_blocks(kx, kz)
+    nj = length(idx)
+    sd = state.state_data
+    Wj = input.data.W[idx, :] # nj x kz
+    Xj = input.data.X[idx, :] # nj x kx
+    dj = sd.dstar[idx]
+    y1j = sd.y1[idx]
+    y0j = sd.y0[idx]
 
-    nj = state.state_dp.njs[j]
-    
-    dstarj = view(state.state_data.dstar, idx) # nj x 1
-    y1j = view(state.state_data.y1, idx) # nj x 1
-    y0j = view(state.state_data.y0, idx) # nj x 1
-    
-    yij = vcat(dstarj, y1j, y0j) # 3nj x 1
-    ##Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] # 3nj x ktot
+    ## 1. Sigma ~ NobileWishart(nj + rho, E'E + rho R), E = residuals at the current beta
+    beta = state.state_theta[j].beta
+    ed = dj .- Wj * beta[g]
+    e1 = y1j .- Xj * beta[b1]
+    e0 = y0j .- Xj * beta[b0]
+    U = [dot(ed, ed) dot(ed, e1) dot(ed, e0);
+         dot(e1, ed) dot(e1, e1) dot(e1, e0);
+         dot(e0, ed) dot(e0, e1) dot(e0, e0)]
+    U .+= p.prior_Sigma.rho .* p.prior_Sigma.R
+    Sigma_j = NobileWishart( (nj + p.prior_Sigma.rho), U )
 
-    ## 1. update Sigma
-    function sample_Sigma( prior_theta::PriorTheta, theta::Theta )
-        ##, Hj::SparseMatrixCSC{Float64,Int64}, yij::Vector{Float64})
-        ##nj = div(length(yij),3)
-        ##Hb = Hj*state_theta.beta # 3nj x 1
-        Uj = yij - Hj*theta.beta # 3nj x 1
-        if length(Uj) != 3nj error("Dimension mismatch! Oops") end
-        Uj = reshape(Uj, nj, 3) # nj x 3
-        Uj = Uj'*Uj + prior_theta.prior_Sigma.rho*prior_theta.prior_Sigma.R # 3 x 3        
-        Sigma_j = NobileWishart( (nj + prior_theta.prior_Sigma.rho), Uj )
-        return Sigma_j
-    end
-    
-    Sigma_j = sample_Sigma(input.priors.prior_theta, state.state_theta[j])
-    
-    ## 2. update beta
-    function sample_beta( prior_theta::PriorTheta, state::GibbsState )
-        sigXi = kron( inv(Sigma_j), sparse(1.0I, nj, nj) ) # 3nj x 3nj
-        xb = Hj'*sigXi # ktot x 3nj
-        vj = xb*Hj + prior_theta.prior_beta.V # ktot x ktot
-        vj = inv(vj) # ktot x ktot
-        mj = *( vj, xb*yij + state.state_sampler.Vmu ) # ktot x 1
-        beta_j = mj + cholesky( Hermitian(vj) ).U'*randn(length(mj))
-        return beta_j
-    end
-    
-    beta_j = sample_beta(input.priors.prior_theta, state)
-    
+    ## 2. beta ~ N(vj (H_j'(Sinv ⊗ I) z_j + V mu), vj), vj = (H_j'(Sinv ⊗ I)H_j + V)^-1
+    Sinv = inv(Sigma_j)
+    vj = inv(design_precision(Sinv, Wj' * Wj, Wj' * Xj, Xj' * Xj) + p.prior_beta.V)
+    r = vcat(Wj' * (Sinv[1,1] .* dj .+ Sinv[1,2] .* y1j .+ Sinv[1,3] .* y0j),
+             Xj' * (Sinv[2,1] .* dj .+ Sinv[2,2] .* y1j .+ Sinv[2,3] .* y0j),
+             Xj' * (Sinv[3,1] .* dj .+ Sinv[3,2] .* y1j .+ Sinv[3,3] .* y0j))
+    mj = vj * (r .+ state.state_sampler.Vmu)
+    beta_j = mj + cholesky( Hermitian(vj) ).U' * randn(length(mj))
+
     state.state_theta[j] = Theta(beta=beta_j, Sigma=Sigma_j)
-    
     return state
-
 end
 
-function update_latent!(state::GibbsState, input::GibbsInput, j::Int64, idx::Vector{Int64},
-                        Hj::SparseMatrixCSC{Float64,Int64})
+## conditional moments of the latent data given Sigma (the formulas of the original
+## update_latent!, verified in the review): the missing outcome given d* and the observed
+## outcome, and d* given (y1, y0)
+struct LatentMoments
+    c1d::Float64; c1y::Float64; omega1::Float64 # y1 | d*, y0
+    c0d::Float64; c0y::Float64; omega0::Float64 # y0 | d*, y1
+    sd1::Float64; sd0::Float64; omega_d::Float64 # d* | y1, y0
+end
 
-    nj = state.state_dp.njs[j]
-    
-    dstarj = view(state.state_data.dstar, idx) # nj x 1
-    
-    yj = view(input.data.y.a, idx) # nj x 1
-    dj = view(input.data.d, idx) # nj x 1
-    
-    ##Hb = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] * state.state_theta[j].beta # 3nj x 1
-    Hb = Hj * state.state_theta[j].beta
-    zbD = view(Hb, 1:nj) # nj x 1
-    xb1 = view(Hb, (nj+1):(2nj)) # nj x 1
-    xb0 = view(Hb, (2nj+1):(3nj)) # nj x 1
-    
-    ## pre-compute constants
-    mid = (state.state_theta[j].Sigma[2,3])*(state.state_theta[j].Sigma[1,3])*(state.state_theta[j].Sigma[1,2])
-    
-    ## 1. update missing outcomes -> y1, y0
-    function sample_ymiss(Sigma::Matrix{Float64})
-        ## compute denominators
-        denom1 = Sigma[2,2] - (Sigma[1,2]^2)
-        denom0 = Sigma[3,3] - (Sigma[1,3]^2)
-        ## compute potential outcome means
-        mu1 = xb1 +
-        (dstarj - zbD) * ( ( (Sigma[3,3] * Sigma[1,2]) - (Sigma[2,3] * Sigma[1,3]) ) / denom0 ) +
-        (yj - xb0) * ( ( Sigma[2,3] - (Sigma[1,3] * Sigma[1,2]) ) / denom0 )
-        mu0 = xb0 +
-        (dstarj - zbD) * ( ( (Sigma[2,2] * Sigma[1,3]) - (Sigma[2,3] * Sigma[1,2]) ) / denom1 ) +
-        (yj - xb1) * ( ( Sigma[2,3] - (Sigma[1,3] * Sigma[1,2]) ) / denom1 )        
-        ## compute potential outcome variances
-        omega1 = Sigma[2,2] - ( ( (Sigma[1,2]^2 * Sigma[3,3]) - 2*mid + (Sigma[2,3]^2) ) / denom0 )
-        omega0 = Sigma[3,3] - ( ( (Sigma[1,3]^2 * Sigma[2,2]) - 2*mid + (Sigma[2,3]^2) ) / denom1 )
-        ## compute missing outcome mean and variance
-        mu_miss = (1 .- dj).*mu1 + dj.*mu0
-        var_miss = (1 .- dj)*omega1 + dj*omega0
-        ## compute missing outcome
-        ymiss_j = mu_miss + sqrt.(var_miss) .* randn(nj)
-        return ymiss_j
+function LatentMoments(S::AbstractMatrix{Float64})
+    mid = S[2,3] * S[1,3] * S[1,2]
+    denom1 = S[2,2] - S[1,2]^2
+    denom0 = S[3,3] - S[1,3]^2
+    denomd = S[2,2] * S[3,3] - S[2,3]^2
+    return LatentMoments(
+        ( (S[3,3] * S[1,2]) - (S[2,3] * S[1,3]) ) / denom0,
+        ( S[2,3] - (S[1,3] * S[1,2]) ) / denom0,
+        S[2,2] - ( ( (S[1,2]^2 * S[3,3]) - 2*mid + (S[2,3]^2) ) / denom0 ),
+        ( (S[2,2] * S[1,3]) - (S[2,3] * S[1,2]) ) / denom1,
+        ( S[2,3] - (S[1,3] * S[1,2]) ) / denom1,
+        S[3,3] - ( ( (S[1,3]^2 * S[2,2]) - 2*mid + (S[2,3]^2) ) / denom1 ),
+        ( (S[3,3] * S[1,2]) - (S[2,3] * S[1,3]) ) / denomd,
+        ( (S[2,2] * S[1,3]) - (S[2,3] * S[1,2]) ) / denomd,
+        1 - ( ( (S[1,2]^2 * S[3,3]) - 2*mid + (S[1,3]^2 * S[2,2]) ) / denomd ))
+end
+
+## draw unit i's missing outcome given d*_i and its observed outcome yi; returns (y1, y0)
+@inline function draw_ymiss(lm::LatentMoments, md, m1, m0, dstar, yi, di)
+    if di == 1
+        return yi, m0 + (dstar - md) * lm.c0d + (yi - m1) * lm.c0y + sqrt(lm.omega0) * randn()
+    else
+        return m1 + (dstar - md) * lm.c1d + (yi - m0) * lm.c1y + sqrt(lm.omega1) * randn(), yi
     end
-    
-    ymiss_j = sample_ymiss(state.state_theta[j].Sigma)
-    
-    ## update potential outcomes
-    y1j = dj.*yj + (1 .- dj).*ymiss_j
-    y0j = dj.*ymiss_j + (1 .- dj).*yj
-    
-    ## 2. update selection outcome
-    function update_dstar!(Sigma::Matrix{Float64})
-        ## compute denominator and other factors
-        denomd = (Sigma[2,2] * Sigma[3,3]) - (Sigma[2,3]^2 )
-        sd1 = ( ( (Sigma[3,3] * Sigma[1,2]) - (Sigma[2,3] * Sigma[1,3]) ) / denomd )
-        sd0 = ( ( (Sigma[2,2] * Sigma[1,3]) - (Sigma[2,3] * Sigma[1,2]) ) / denomd )
-        ## compute mean
-        mu_d = zbD + (y1j - xb1)*sd1 + (y0j - xb0)*sd0
-        ## compute variance
-        omega_d = 1 - ( ( (Sigma[1,2]^2 * Sigma[3,3]) - 2*mid + (Sigma[1,3]^2 * Sigma[2,2]) ) / denomd )        
-        @inbounds for i in 1:nj
-            #dstarj[i] = rand( Distributions.TruncatedNormal(mu_d[i], sqrt(omega_d),
-            #                                                input.data.lower[idx[i]], input.data.upper[idx[i]]) )
-            dstarj[i] = rand( Distributions.truncated(
-            Normal(mu_d[i], sqrt(omega_d)), input.data.lower[idx[i]], input.data.upper[idx[i]]
-            ) )
-        end
-        return dstarj
+end
+
+## update the latent data (y_miss, then d*) of component j's members idx. Units are
+## conditionally independent given theta_j, so each unit's two draws are done in turn.
+function update_latent!(state::GibbsState, input::GibbsInput, j::Integer, idx::AbstractVector{<:Integer})
+    th = state.state_theta[j]
+    lm = LatentMoments(th.Sigma)
+    sdd = sqrt(lm.omega_d)
+    X, W = input.data.X, input.data.W
+    y, d = input.data.y.a, input.data.d
+    lower, upper = input.data.lower, input.data.upper
+    sd = state.state_data
+    @inbounds for i in idx
+        md, m1, m0 = unit_mean(X, W, th.beta, i)
+        ## 1. missing outcome
+        y1, y0 = draw_ymiss(lm, md, m1, m0, sd.dstar[i], y[i], d[i])
+        sd.y1[i] = y1
+        sd.y0[i] = y0
+        ## 2. selection outcome
+        mu_d = md + (y1 - m1) * lm.sd1 + (y0 - m0) * lm.sd0
+        sd.dstar[i] = rand( truncated(Normal(mu_d, sdd), lower[i], upper[i]) )
     end
-    
-    dstarj = update_dstar!(state.state_theta[j].Sigma)
-    
-    setindex!(state.state_data.dstar, dstarj, idx)
-    setindex!(state.state_data.y1, y1j, idx)
-    setindex!(state.state_data.y0, y0j, idx)
-    
     return state
-    
 end
 
 ## update concentration parameter
@@ -294,17 +292,17 @@ function update_alpha!(state::GibbsState, input::GibbsInput)
 
     ## sample auxiliary variable
     state.state_dp.eta = rand( Distributions.Beta(state.state_dp.alpha + 1, input.dims.n) )
-    
+
     ## update shape and rate parameters
     b_star = input.priors.prior_dp.alpha_rate - log(state.state_dp.eta)
     a_star = input.priors.prior_dp.alpha_shape + state.state_dp.J
     A = (input.priors.prior_dp.alpha_shape + state.state_dp.J - 1) / (input.dims.n * b_star)
     ## Escobar & West (1995): shape a+k with probability pi_eta = A/(1+A), else a+k-1
     a_star = rand() < A/(1 + A) ? a_star : a_star - 1
-    
+
     ## sample alpha
     state.state_dp.alpha = rand( Distributions.Gamma(a_star, 1/b_star) )
-    
+
     ## update zdenom
     state.state_sampler.zdenom = state.state_dp.alpha + input.dims.n - 1
 
@@ -317,37 +315,34 @@ function update_out!(state::GibbsState, out::GibbsOut, m::Int64)
     out.out_data[m] = copy(state.state_data)
     out.out_dp[m] = copy(state.state_dp)
     out.out_theta[m] = copy(state.state_theta)
-    ## push!(out.out_theta, state.state_theta)
     return out
 end
 
 ## update sampler state after a run
 function update_sampler!(state::GibbsState, M::Int64)
     state.state_sampler.chain = true
-    ##state.state_sampler.batch_1 += state.state_sampler.batch_m
     state.state_sampler.batch_m += M
     return state
 end
-
-## update sampler state after data dump
 
 ## --------------------------------------------------------------------------- #
 ## specialized functions for Gaussian model
 
 function update_gaussian_params!(state::GibbsState, input::GibbsInput)
-    idx = collect(1:input.dims.n)
+    idx = 1:input.dims.n
     ## update theta
-    state = update_theta!(state, input, 1, idx, input.data.Hmat)
-    ## update latent data        
-    state = update_latent!(state, input, 1, idx, input.data.Hmat)
+    state = update_theta!(state, input, 1, idx)
+    ## update latent data
+    state = update_latent!(state, input, 1, idx)
     return state
-end    
+end
 
 ## --------------------------------------------------------------------------- #
 ## specialized functions for FMN
 
 ## update labels for fmn
 function update_fmn_labels!(state::GibbsState, input::GibbsInput)
+    chols = component_chols(state.state_theta)
     ## update component labels for each i
     @inbounds for i in 1:input.dims.n
         ji = state.state_dp.labels[i] # i's current component
@@ -355,23 +350,24 @@ function update_fmn_labels!(state::GibbsState, input::GibbsInput)
         state.state_dp.njs[ji] = state.state_dp.njs[ji] - 1 # decrease ji count
         if state.state_dp.njs[ji] < 0 error("Negative label count! Oops") end
         ## sample component label
-        state = sample_fmn_label!(state, input, i)
+        state = sample_fmn_label!(state, input, i, chols)
     end
     rebuild_members!(state.state_dp)
     return state
 end
 
 ## sample fmn label for i
-function sample_fmn_label!(state::GibbsState, input::GibbsInput, i::Int64)    
-    Hi = input.data.Hmat[vcat(i, i+input.dims.n, i+2*input.dims.n), :] # 3 x ktot
-    yi = [state.state_data.dstar[i], state.state_data.y1[i], state.state_data.y0[i]] # 3 x 1
+function sample_fmn_label!(state::GibbsState, input::GibbsInput, i::Int64, chols::Vector{Chol3})
+    X, W = input.data.X, input.data.W
+    z = unit_z(state.state_data, i)
     logw = Array{Float64}(undef, state.state_dp.J)
     @inbounds for j in 1:state.state_dp.J
-        logw[j] = log( state.state_dp.njs[j] + state.state_dp.alpha ) + prob_theta(state.state_theta[j], Hi, yi)
+        logw[j] = log( state.state_dp.njs[j] + state.state_dp.alpha ) +
+                  logpdf_unit(chols[j], state.state_theta[j].beta, X, W, z, i)
     end
     ## sample component
     ji = sample_logweights(logw)
-    state.state_dp.labels[i] = ji    
+    state.state_dp.labels[i] = ji
     ## update counts
     state.state_dp.njs[ji] +=  1
     return state
@@ -381,7 +377,7 @@ end
 ## --------------------------------------------------------------------------- #
 ## specialized functions for blocked sampler
 
-## another approach
+## v_j ~ Beta(1 + n_j, alpha + sum_{l>j} n_l) for j < J; v_J = 1
 function compute_v(s::StateDP, j::Int64)
     if j < length(s.njs)
         njj = sum( @view s.njs[(j+1):end] )
@@ -407,7 +403,7 @@ function update_ws!(s::StateDP, j::Int64)
     return s
 end
 
-## update stick-breaking weights, v.2
+## update stick-breaking weights
 function compute_weights!(state_dp::StateDP)
     length(state_dp.ws) == length(state_dp.njs) || resize!(state_dp.ws, length(state_dp.njs))
     for j in 1:length(state_dp.njs)
@@ -417,8 +413,9 @@ function compute_weights!(state_dp::StateDP)
 end
 
 function update_blocked_labels!(state::GibbsState, input::GibbsInput)
+    chols = component_chols(state.state_theta)
     for i in 1:input.dims.n
-        state = sample_blocked_label!(state, input, i)
+        state = sample_blocked_label!(state, input, i, chols)
     end
 
     state.state_dp = compute_weights!(state.state_dp)
@@ -427,15 +424,15 @@ function update_blocked_labels!(state::GibbsState, input::GibbsInput)
     return state
 end
 
-function sample_blocked_label!(state::GibbsState, input::GibbsInput, i::Int64)
-    Hi = input.data.Hmat[vcat(i, i+input.dims.n, i+2*input.dims.n), :]
-    yi = [state.state_data.dstar[i], state.state_data.y1[i], state.state_data.y0[i]]
-    logw = Array{Float64}(undef, input.priors.prior_dp.J)
+function sample_blocked_label!(state::GibbsState, input::GibbsInput, i::Int64, chols::Vector{Chol3})
+    X, W = input.data.X, input.data.W
+    z = unit_z(state.state_data, i)
+    logw = Array{Float64}(undef, length(state.state_dp.njs))
     # remove i from current component
     state.state_dp.njs[state.state_dp.labels[i]] -= 1
     ## 1. compute log Pr(label i = j)
     @inbounds for j in 1:length(state.state_dp.njs)
-        logw[j] = log( state.state_dp.ws[j].w ) + prob_theta(state.state_theta[j], Hi, yi)
+        logw[j] = log( state.state_dp.ws[j].w ) + logpdf_unit(chols[j], state.state_theta[j].beta, X, W, z, i)
     end
     ## 2. sample ji
     ji = sample_logweights(logw)
@@ -462,7 +459,6 @@ end
 
 ## update parameters {LatentData, Theta}
 function update_blocked_params!(state::GibbsState, input::GibbsInput)
-    #for k in keys(state.state_dp.ws) or keys(state.state_dp.njs)
     @inbounds for j in 1:input.priors.prior_dp.J
         if state.state_dp.njs[j] == 0
             ## sample from prior
@@ -470,11 +466,8 @@ function update_blocked_params!(state::GibbsState, input::GibbsInput)
         else
             ## sample from posterior
             idx = state.state_dp.members[j]
-            Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] # 3nj x ktot        
-            ## update theta
-            state = update_theta!(state, input, j, idx, Hj)
-            ## update latent data        
-            state = update_latent!(state, input, j, idx, Hj)
+            state = update_theta!(state, input, j, idx)
+            state = update_latent!(state, input, j, idx)
         end
     end
     return state
@@ -499,87 +492,34 @@ end
 
 ## update latent data, given true theta
 function update_latent_only!(state::GibbsState, input::GibbsInput)
-    @inbounds for j in 1:state.state_dp.J # k in keys(state.state_theta) or keys(state.state_dp.njs)        
-        if state.state_dp.njs[j] == 0 continue end        
-        idx = state.state_dp.members[j]
-        ##Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] # 3nj x ktot
-        ## update latent data
-        state = update_ymiss_only!(state, input, j, idx)
-    end    
-    return state    
+    @inbounds for j in 1:state.state_dp.J
+        if state.state_dp.njs[j] == 0 continue end
+        state = update_ymiss_only!(state, input, j, state.state_dp.members[j])
+    end
+    return state
 end
 
 ## update theta, given true latent data
 function update_theta_only!(state::GibbsState, input::GibbsInput)
-    @inbounds for j in 1:state.state_dp.J # k in keys(state.state_theta) or keys(state.state_dp.njs)        
-        if state.state_dp.njs[j] == 0 continue end        
-        idx = state.state_dp.members[j]
-        Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] # 3nj x ktot        
-        ## update theta
-        state = update_theta!(state, input, j, idx, Hj)        
-    end    
-    return state    
+    @inbounds for j in 1:state.state_dp.J
+        if state.state_dp.njs[j] == 0 continue end
+        state = update_theta!(state, input, j, state.state_dp.members[j])
+    end
+    return state
 end
 
-## no update, check assignment
-function update_ymiss_only!(state::GibbsState, input::GibbsInput, j::Int64, idx::Vector{Int64})
-
-    nj = state.state_dp.njs[j]
-
-    dstarj = view(state.state_data.dstar, idx) # nj x 1
-    y1j = view(state.state_data.y1, idx) # nj x 1
-    y0j = view(state.state_data.y0, idx) # nj x 1
-    
-    yj = view(input.data.y.a, idx) # nj x 1
-    dj = view(input.data.d, idx) # nj x 1
-    
-    Hb = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] * state.state_theta[j].beta # 3nj x 1
-    zbD = view(Hb, 1:nj) # nj x 1
-    xb1 = view(Hb, (nj+1):(2nj)) # nj x 1
-    xb0 = view(Hb, (2nj+1):(3nj)) # nj x 1
-    
-    ## pre-compute constants
-    mid = (state.state_theta[j].Sigma[2,3])*(state.state_theta[j].Sigma[1,3])*(state.state_theta[j].Sigma[1,2])
-    
-    ## 1. update missing outcomes -> y1, y0
-    function sample_ymiss(Sigma::Matrix{Float64})
-        ## compute denominators
-        denom1 = (Sigma[2,2]) - (Sigma[1,2])^2
-        denom0 = (Sigma[3,3]) - (Sigma[1,3])^2
-        ## compute potential outcome means
-        mu1 = xb1 +
-        (dstarj - zbD) * ( ( (Sigma[3,3]) * (Sigma[1,2]) - (Sigma[2,3]) * (Sigma[1,3]) ) / denom0 ) +
-        (yj - xb0) * ( ( (Sigma[2,3]) - (Sigma[1,3]) * (Sigma[1,2]) ) / denom0 )        
-        mu0 = xb0 +
-        (dstarj - zbD) * ( ( (Sigma[2,2]) * (Sigma[1,3]) - (Sigma[2,3]) * (Sigma[1,2]) ) / denom1 ) +
-        (yj - xb1) * ( ( (Sigma[2,3]) - (Sigma[1,3]) * (Sigma[1,2]) ) / denom1 )        
-        ## compute potential outcome variances
-        omega1 = (Sigma[2,2]) - ( ( (Sigma[1,2])^2 * (Sigma[3,3]) - 2*mid + (Sigma[2,3])^2 ) / denom0 )
-        omega0 = (Sigma[3,3]) - ( ( (Sigma[1,3])^2 * (Sigma[2,2]) - 2*mid + (Sigma[2,3])^2 ) / denom1 )
-        ## compute missing outcome mean and variance
-        mu_miss = ( (1 .- dj) .* mu1 ) + ( dj .* mu0 )  
-        var_miss = ( (1 .- dj) * omega1 ) + ( dj * omega0 )
-        ## compute missing outcome
-        return mu_miss + sqrt.(var_miss) .* randn(nj)
+## update the missing outcomes only, d* fixed
+function update_ymiss_only!(state::GibbsState, input::GibbsInput, j::Integer, idx::AbstractVector{<:Integer})
+    th = state.state_theta[j]
+    lm = LatentMoments(th.Sigma)
+    X, W = input.data.X, input.data.W
+    y, d = input.data.y.a, input.data.d
+    sd = state.state_data
+    @inbounds for i in idx
+        md, m1, m0 = unit_mean(X, W, th.beta, i)
+        sd.y1[i], sd.y0[i] = draw_ymiss(lm, md, m1, m0, sd.dstar[i], y[i], d[i])
     end
-    
-    ymiss_j = sample_ymiss(state.state_theta[j].Sigma)
-    
-    ## update potential outcomes
-    y1j = dj.*yj + (1 .- dj).*ymiss_j
-    y0j = dj.*ymiss_j + (1 .- dj).*yj
-    
-    ## fake update potential outcomes
-    ####ymiss_j = [ dj[i] == 1 ? y0j[i] : y1j[i] for i in 1:nj ]
-    ##y1j = dj.*yj + (1 .- dj).*y1j
-    ##y0j = dj.*y0j + (1 .- dj).*yj
-    
-    ##setindex!(state.state_data.dstar, dstarj, idx)
-    setindex!(state.state_data.y1, y1j, idx)
-    setindex!(state.state_data.y0, y0j, idx)
-    
     return state
-    
 end
 
 ## --------------------------------------------------------------------------- #
@@ -587,17 +527,12 @@ end
 
 ## update {Theta} only
 function update_blocked_theta_only!(state::GibbsState, input::GibbsInput)
-    ##for k in keys(state.state_dp.ws) or keys(state.state_dp.njs)
     @inbounds for j in 1:input.priors.prior_dp.J
         if state.state_dp.njs[j] == 0
             ## sample from prior
             state.state_theta = sample_prior_theta!(state.state_theta, input.priors.prior_theta, j)
         else
-            ## sample from posterior
-            idx = state.state_dp.members[j]
-            Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] # 3nj x ktot        
-            ## update theta
-            state = update_theta!(state, input, j, idx, Hj)
+            state = update_theta!(state, input, j, state.state_dp.members[j])
         end
     end
     return state
@@ -608,9 +543,10 @@ end
 
 ## update labels using marginalized CRP probabilities
 function update_marginal_labels!(state::GibbsState, input::GibbsInput)
+    chols = component_chols(state.state_theta)
     ## update component labels for each i
     @inbounds for i in 1:input.dims.n
-        state = sample_marginal_label!(state, input, i)
+        state = sample_marginal_label!(state, input, i, chols)
     end
     ## update active component count
     state.state_dp = update_J!(state.state_dp)
@@ -619,38 +555,39 @@ function update_marginal_labels!(state::GibbsState, input::GibbsInput)
 end
 
 ## sample marginal label for observation i
-function sample_marginal_label!(state::GibbsState, input::GibbsInput, i::Int64)
-    
+function sample_marginal_label!(state::GibbsState, input::GibbsInput, i::Int64, chols::Vector{Chol3})
+    X, W = input.data.X, input.data.W
+
     ## remove i from current component
     ji_old = state.state_dp.labels[i]
     state.state_dp.njs[ji_old] -= 1
-    
-    ## setup data for observation i
-    Hi = input.data.Hmat[vcat(i, i+input.dims.n, i+2*input.dims.n), :] # 3 x ktot
-    yi = [state.state_data.dstar[i], state.state_data.y1[i], state.state_data.y0[i]] # 3 x 1
-    
+
+    z = unit_z(state.state_data, i)
+
     ## compute probabilities for all J components
     logw = Array{Float64}(undef, input.priors.prior_dp.J)
     @inbounds for j in 1:input.priors.prior_dp.J
         if state.state_dp.njs[j] > 0
             ## existing component with data
-            logw[j] = log(state.state_dp.njs[j]) + prob_theta(state.state_theta[j], Hi, yi)
+            logw[j] = log(state.state_dp.njs[j]) + logpdf_unit(chols[j], state.state_theta[j].beta, X, W, z, i)
         else
             ## empty component - sample from prior
-            theta_j = sample_new_theta(input.priors.prior_theta, state, Hi, yi)
-            logw[j] = log(state.state_dp.alpha / input.priors.prior_dp.J) + prob_theta(theta_j, Hi, yi)
+            theta_j = sample_new_theta(input.priors.prior_theta, state, input, i, z)
+            chols[j] = Chol3(theta_j.Sigma)
+            logw[j] = log(state.state_dp.alpha / input.priors.prior_dp.J) +
+                      logpdf_unit(chols[j], theta_j.beta, X, W, z, i)
             ## store the sampled theta for potential use
             state.state_theta[j] = theta_j
         end
     end
-    
+
     ## sample new component
     ji_new = sample_logweights(logw)
     state.state_dp.labels[i] = ji_new
-    
+
     ## update component count
     state.state_dp.njs[ji_new] += 1
-    
+
     return state
 end
 
@@ -658,14 +595,9 @@ end
 function update_marginal_params!(state::GibbsState, input::GibbsInput)
     @inbounds for j in 1:input.priors.prior_dp.J
         if state.state_dp.njs[j] > 0 # Only update active components
-            ## active component - sample from posterior
             idx = state.state_dp.members[j]
-            Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n), :] # 3nj x ktot
-            
-            ## update theta
-            state = update_theta!(state, input, j, idx, Hj)
-            ## update latent data        
-            state = update_latent!(state, input, j, idx, Hj)
+            state = update_theta!(state, input, j, idx)
+            state = update_latent!(state, input, j, idx)
         end
     end
     return state
@@ -675,17 +607,17 @@ end
 function update_marginal_alpha!(state::GibbsState, input::GibbsInput)
     ## sample auxiliary variable
     state.state_dp.eta = rand(Distributions.Beta(state.state_dp.alpha + 1, input.dims.n))
-    
+
     ## update shape and rate parameters (same as standard sampler)
     b_star = input.priors.prior_dp.alpha_rate - log(state.state_dp.eta)
     a_star = input.priors.prior_dp.alpha_shape + state.state_dp.J
     A = (input.priors.prior_dp.alpha_shape + state.state_dp.J - 1) / (input.dims.n * b_star)
     ## Escobar & West (1995): shape a+k with probability pi_eta = A/(1+A), else a+k-1
     a_star = rand() < A/(1 + A) ? a_star : a_star - 1
-    
+
     ## sample alpha
     state.state_dp.alpha = rand(Distributions.Gamma(a_star, 1/b_star))
-    
+
     ## update zdenom (though not used in marginal approach)
     state.state_sampler.zdenom = state.state_dp.alpha + input.dims.n - 1
 
@@ -699,11 +631,7 @@ function update_marginal_theta_only!(state::GibbsState, input::GibbsInput)
             ## empty component - sample from prior
             state.state_theta = sample_prior_theta!(state.state_theta, input.priors.prior_theta, j)
         else
-            ## active component - update theta only
-            idx = state.state_dp.members[j]
-            Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n), :] # 3nj x ktot
-            ## update theta
-            state = update_theta!(state, input, j, idx, Hj)
+            state = update_theta!(state, input, j, state.state_dp.members[j])
         end
     end
     return state

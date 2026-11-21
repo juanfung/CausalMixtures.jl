@@ -93,6 +93,7 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     
     ## collect data objects
     input_data = InputData(y=ys, d=d, lower=lower, upper=upper, Hmat=Hmat,
+                           X=Matrix{Float64}(xmats.a), W=Matrix{Float64}(zmats.a),
                            xnames=string.(coefnames(xframe)), znames=string.(coefnames(zframe)))
 
     model = params.model

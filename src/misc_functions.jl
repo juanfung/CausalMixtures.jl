@@ -39,6 +39,40 @@ function NobileWishart(rng::AbstractRNG, nu::Int64, V::Array{Float64})
 end
 
 
+## Cholesky factor L (Sigma = L L') of a 3x3 positive-definite matrix, held as scalars, and
+## log|Sigma|. Built once per component per sweep, so the label steps evaluate the 3-dimensional
+## normal density with a few flops and no allocation.
+struct Chol3
+    l11::Float64
+    l21::Float64
+    l31::Float64
+    l22::Float64
+    l32::Float64
+    l33::Float64
+    logdet::Float64
+end
+
+function Chol3(S::AbstractMatrix{<:Real})
+    l11 = sqrt(S[1,1])
+    l21 = S[2,1] / l11
+    l31 = S[3,1] / l11
+    l22 = sqrt(S[2,2] - l21^2)
+    l32 = (S[3,2] - l31 * l21) / l22
+    l33 = sqrt(S[3,3] - l31^2 - l32^2)
+    return Chol3(l11, l21, l31, l22, l32, l33, 2 * (log(l11) + log(l22) + log(l33)))
+end
+
+const LOG2PI = log(2pi)
+
+## log N3(e | 0, Sigma) for the residual e = (e1, e2, e3), given Sigma's factor c
+@inline function logpdf3(c::Chol3, e1::Real, e2::Real, e3::Real)
+    u1 = e1 / c.l11
+    u2 = (e2 - c.l21 * u1) / c.l22
+    u3 = (e3 - c.l31 * u1 - c.l32 * u2) / c.l33
+    return -0.5 * (u1^2 + u2^2 + u3^2) - 0.5 * c.logdet - 1.5 * LOG2PI
+end
+
+
 ## log(sum(exp.(logw))) without overflow or underflow
 function logsumexp(logw::AbstractVector{<:Real})
     m = maximum(logw)
