@@ -12,6 +12,7 @@ result = @testset "CausalMixtures.jl Tests" begin
     include("testgibbsstate.jl")
     include("testgibbsout.jl")
     include("testCausalMixtures.jl")
+    include("testdpm_init.jl")
 
     # statistical test helpers
     include("test_helpers.jl")

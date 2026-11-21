@@ -1,5 +1,5 @@
 using Test
-using CausalMixtures
+using CausalMixtures, DataFrames, StatsModels
 
 # Test the dpm_init function
 @testset "dpm_init function" begin
@@ -8,9 +8,8 @@ using CausalMixtures
     y_form = @formula(y ~ x1 + x2)
     d_form = @formula(d ~ x1 + x2)
     raw_data = CausalMixtures.RawData(y_form, d_form, df)
-    prior_dp = CausalMixtures.PriorDP(alpha = 1.0, J = 20)
-    prior_theta = CausalMixtures.PriorTheta()
-    prior = CausalMixtures.InputPriors(prior_dp = prior_dp, prior_theta = prior_theta)
+    ## kx = kz = 3, so ktot = 9; PriorTheta()'s defaults (2-dim beta, rho = 1) are not valid here
+    prior = CausalMixtures.setup_default_priors(9, J = 20)
     param = CausalMixtures.InputParams(M = 1, scale_data = (true, true), verbose = true)
     state, input, output = CausalMixtures.dpm_init(raw_data, prior, param)
     @test state isa CausalMixtures.GibbsState
@@ -24,7 +23,10 @@ using CausalMixtures
     @test input isa CausalMixtures.GibbsInput
     @test output isa CausalMixtures.GibbsOut
     
-    # Test with edge cases (e.g., invalid model)
+    @test length(input.priors.prior_theta.prior_beta.mu) == input.dims.ktot
+    @test sum(values(state.state_dp.njs)) == 3
+
+    # Test with edge cases (e.g., invalid model): rejected at init
     param = CausalMixtures.InputParams(M = 1, scale_data = (true, true), verbose = true, model = "invalid")
-    @test_throws ErrorException CausalMixtures.dpm_init(raw_data, prior, param)
+    @test_throws DomainError CausalMixtures.dpm_init(raw_data, prior, param)
 end

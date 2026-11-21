@@ -36,6 +36,9 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     ## GibbsInput : fixed objects (data, params, priors)
     ## GibbsOut : pre-allocated storage
     
+    ## fail fast on an unknown model (throws DomainError)
+    set_sampler(params.model)
+    
     M = params.M
     scale_data = params.scale_data
     verbose = params.verbose
