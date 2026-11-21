@@ -102,4 +102,30 @@ end
     end
 end
 
+@testset "Fix 6: njs has an entry for every component, including empty ones" begin
+    ## n = 12 units spread over J = 30 components: most components start empty
+    data = generate_hedonic_data(12, 2024)
+    raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
+    priors = setup_default_priors(data.true_params.ktot, J=30)
+    for model in ("dpm", "fmn", "blocked", "marginal")
+        seed_global!()
+        params = CausalMixtures.InputParams(M=3, verbose=false, model=model)
+        state, input, out = CausalMixtures.dpm_init(raw, priors, params)
+        dp = state.state_dp
+        @test sort(collect(keys(dp.njs))) == collect(1:dp.J)
+        @test sum(values(dp.njs)) == 12
+        @test length(state.state_theta) == dp.J
+        if model == "dpm"
+            ## Polya urn: only occupied components, labelled 1:k
+            @test all(>(0), values(dp.njs))
+            @test dp.J == length(unique(values(dp.labels)))
+        else
+            @test dp.J == 30
+            @test any(==(0), values(dp.njs))
+        end
+        state, input, out = CausalMixtures.dpm!(state, input, out)
+        @test length(out.out_dp) == 3
+    end
+end
+
 end # Phase 1 fixes

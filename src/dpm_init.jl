@@ -137,13 +137,27 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
             labels[i] = 1
         end
     end
-    ## count component memberships
-    njs = StatsBase.countmap(collect(values(labels)))
+    ## count component memberships, with a (possibly zero) count for every component 1:J
+    J = priors.prior_dp.J
+    if model == "dpm"
+        ## the Polya-urn sampler keeps only occupied components (J = number of clusters),
+        ## so relabel the occupied ones as 1:k
+        occupied = sort(unique(values(labels)))
+        relabel = Dict(j => r for (r, j) in enumerate(occupied))
+        for i in 1:n
+            labels[i] = relabel[labels[i]]
+        end
+        J = length(occupied)
+    end
+    njs = Dict{Int64,Int64}(j => 0 for j in 1:J)
+    for l in values(labels)
+        njs[l] += 1
+    end
     ## compute stick-breaking weights?
     ws = DataStructures.OrderedDict{Int64,BlockedWeights}()
     ## collect DP hyperparameters
     ## initialize alpha to prior alpha, eta = 0
-    state_dp = StateDP(J=priors.prior_dp.J, labels=labels, njs=njs, ws=ws, alpha=priors.prior_dp.alpha, eta=0.0)    
+    state_dp = StateDP(J=J, labels=labels, njs=njs, ws=ws, alpha=priors.prior_dp.alpha, eta=0.0)
     if input.params.model == "blocked"
         ## initialize weights
         for k in sort(collect(keys(state_dp.njs))) get!(state_dp.ws, k, BlockedWeights()) end
@@ -155,7 +169,7 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     ## 2c. initialize theta:
     ## sample theta from prior
     state_theta = Dict{Int64,Theta}()
-    for j in 1:priors.prior_dp.J
+    for j in 1:state_dp.J
         ##beta_j = priors.prior_theta.prior_beta.mu + chol(priors.prior_theta.prior_beta.V)'*randn(ktot)
         ##Sigma_j = NobileWishart(priors.prior_theta.prior_Sigma.rho,
         ##                        priors.prior_theta.prior_Sigma.rho * priors.prior_theta.prior_Sigma.R )
