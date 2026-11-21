@@ -80,9 +80,9 @@ end
     seed_global!()
     for _ in 1:200
         st.state_dp.alpha = 1e-3
-        CausalMixtures.compute_weights!(st.state_dp)
+        CausalMixtures.compute_weights!(Random.default_rng(), st.state_dp)
         @test st.state_dp.ws[1].v < 1.0
-        CausalMixtures.update_blocked_alpha!(st, input)
+        CausalMixtures.update_blocked_alpha!(Random.default_rng(), st, input)
         @test isfinite(st.state_dp.alpha) && st.state_dp.alpha > 0
     end
     @test sum(w.w for w in st.state_dp.ws) ≈ 1

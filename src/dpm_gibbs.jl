@@ -1,7 +1,7 @@
 ## improved sampler for DPM
 export dpm_gibbs!
 
-function dpm_gibbs!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=false)
+function dpm_gibbs!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=false, rng::AbstractRNG=Random.default_rng())
     
     ## sampler parameters
     M = input.params.M
@@ -20,7 +20,7 @@ function dpm_gibbs!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=fa
             @printf("\nIteration: %d\nUpdating labels...", m + state.state_sampler.batch_m )
         end
         
-        state = update_labels!(state, input)
+        state = update_labels!(rng, state, input)
         if verbose && mod(m, max(1, M/10)) == 0 @printf("\nCurrent J = %d", state.state_dp.J) end
         
         ## 2. update theta and latent data
@@ -28,9 +28,9 @@ function dpm_gibbs!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=fa
 
         ## test using observed data as latent data?
         if test
-            state = update_theta_only!(state, input)
+            state = update_theta_only!(rng, state, input)
         else
-            state = update_params!(state, input)
+            state = update_params!(rng, state, input)
         end
         
         ## 3. update alpha?
@@ -38,7 +38,7 @@ function dpm_gibbs!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=fa
             if verbose && mod(m, max(1, M/10)) == 0 @printf("\nUpdating alpha...") end
             
             ## sample alpha
-            state = update_alpha!(state, input)
+            state = update_alpha!(rng, state, input)
             if verbose && mod(m, max(1, M/10)) == 0 @printf("\nCurrent alpha = %f", state.state_dp.alpha) end            
         end
         

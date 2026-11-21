@@ -24,12 +24,14 @@ function set_sampler(model::String)
 end
 
 ## initialize sampler
-function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats_out=false)
+function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats_out=false,
+                  rng::AbstractRNG=Random.default_rng())
     
     ## Inputs:
     ## data (data type object): DataFrame and Formula objects
     ## prior (prior type object): prior hyperparameters
     ## param (param type object): sampler parameters
+    ## rng: random number generator for the initial state (pass the same one to dpm!)
     
     ## Output:
     ## GibbsState : initial sampler state
@@ -132,7 +134,7 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     ## sample selection outcome
     dstar = zeros(n)
     @inbounds for i in 1:n
-        dstar[i] = rand( truncated(Normal(0, 1), lower[i], upper[i]) )
+        dstar[i] = rand(rng, truncated(Normal(0, 1), lower[i], upper[i]) )
     end
     ## initialize potential outcomes using observed data
     state_data = StateData(dstar=dstar, y1=copy(ys.a), y0=copy(ys.a))
@@ -140,7 +142,7 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     ## 2b. initialize DP:
     ## assign component membership uniformly
     J = priors.prior_dp.J
-    labels = J != 1 ? [rand(1:J) for i in 1:n] : ones(Int64, n)
+    labels = J != 1 ? [rand(rng, 1:J) for i in 1:n] : ones(Int64, n)
     if model == "dpm"
         ## the Polya-urn sampler keeps only occupied components (J = number of clusters),
         ## so relabel the occupied ones as 1:k
@@ -162,7 +164,7 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     if input.params.model == "blocked"
         ## initialize weights
         state_dp.ws = fill(BlockedWeights(), J)
-        state_dp = compute_weights!(state_dp)
+        state_dp = compute_weights!(rng, state_dp)
     elseif input.params.model == "fmn"
         state_dp.alpha = state_dp.alpha / float(state_dp.J)
     end
@@ -175,7 +177,7 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
         ##Sigma_j = NobileWishart(priors.prior_theta.prior_Sigma.rho,
         ##                        priors.prior_theta.prior_Sigma.rho * priors.prior_theta.prior_Sigma.R )
         ##state_theta[j] = Theta(beta=beta_j, Sigma=Sigma_j)
-        state = sample_prior_theta!(state_theta, priors.prior_theta, j)
+        sample_prior_theta!(rng, state_theta, priors.prior_theta, j)
     end
     
     ## 2d. collect sampler state parameters
@@ -204,15 +206,16 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
 end
 
 ## append new output to old
-function dpm_chain!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=false)
+function dpm_chain!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=false,
+                    rng::AbstractRNG=Random.default_rng())
     ## 1. pre-allocate output
     ##out = GibbsOut( [out, Array(StateTheta, input.params.M) ] )    
     dpm_sampler = set_sampler(input.params.model)
     ## pre-allocate storage for new chain
     out_new = GibbsOut(input.params.M)
     ## 2. run sampler
-    println("Continuing from last state...")
-    state, input, out_new = dpm_sampler( state, input, out_new, test=test )
+    if input.params.verbose println("Continuing from last state...") end
+    state, input, out_new = dpm_sampler( state, input, out_new, test=test, rng=rng )
     ## append new output to old output
     ##out.out_M += out_new.out_M
     append!(out.out_data, out_new.out_data)
@@ -225,10 +228,12 @@ function dpm_chain!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=fa
 end
 
 ## wrapper to call sampler
-function dpm!(state::GibbsState, input::GibbsInput, out::GibbsOut=GibbsOut(0); test=false)
+## rng: the random number generator for every draw (default: the global RNG)
+function dpm!(state::GibbsState, input::GibbsInput, out::GibbsOut=GibbsOut(0); test=false,
+              rng::AbstractRNG=Random.default_rng())
     if ( state.state_sampler.chain && length(out.out_data) > 0 )
         ## append output
-        out_tup = dpm_chain!(state, input, out, test = test)
+        out_tup = dpm_chain!(state, input, out, test = test, rng = rng)
     else
         ## no out given?
         if length(out.out_data) == 0 ## || state.state_sampler.chain == false )
@@ -236,7 +241,7 @@ function dpm!(state::GibbsState, input::GibbsInput, out::GibbsOut=GibbsOut(0); t
         end
         ## run new chain
         dpm_sampler = set_sampler(input.params.model)
-        out_tup = dpm_sampler(state, input, out, test=test)
+        out_tup = dpm_sampler(state, input, out, test=test, rng=rng)
     end    
     return out_tup    
 end
@@ -260,7 +265,7 @@ end
 ## new: JLD2 version
 ## TODO: Check for consistency with chain_dpm.jl
 function dpm_dump!(state::GibbsState, input::GibbsInput, out::GibbsOut;
-                   fname::String="out", dir::String="./")
+                   fname::String="out", dir::String="./", rng::AbstractRNG=Random.default_rng())
     old_m = state.state_sampler.batch_m
     out_m = state.state_sampler.batch_m
     out_1 = old_m - input.params.M + 1
@@ -301,7 +306,7 @@ function dpm_dump!(state::GibbsState, input::GibbsInput, out::GibbsOut;
     state.state_sampler.batch_1 += state.state_sampler.batch_m # increment starting point
     dpm_sampler = set_sampler(input.params.model)
     if input.params.verbose println("Continuing from last state...") end
-    state, input, out = dpm_sampler( state, input, out)
+    state, input, out = dpm_sampler( state, input, out, rng=rng)
     return (state, input, out)
 end
 

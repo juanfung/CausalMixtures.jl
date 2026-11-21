@@ -21,7 +21,7 @@ using .TestHelpers
         th = CausalMixtures.StateTheta()
         B = Matrix{Float64}(undef, N, length(mu))
         for r in 1:N
-            CausalMixtures.sample_prior_theta!(th, pt, 1)
+            CausalMixtures.sample_prior_theta!(Random.default_rng(), th, pt, 1)
             B[r, :] = th[1].beta
         end
         @test moments_match(B, mu, V0)
@@ -35,7 +35,7 @@ using .TestHelpers
     @test pr.prior_theta.prior_beta.Vcov ≈ V0
     seed_global!()
     th = CausalMixtures.StateTheta()
-    B = reduce(vcat, (CausalMixtures.sample_prior_theta!(th, pr.prior_theta, 1)[1].beta' for _ in 1:20_000))
+    B = reduce(vcat, (CausalMixtures.sample_prior_theta!(Random.default_rng(), th, pr.prior_theta, 1)[1].beta' for _ in 1:20_000))
     @test covs_match(B, V0; mean=zeros(7))
 end
 
@@ -59,7 +59,7 @@ end
                                                       alpha_shape=a, alpha_rate=b)))
         state = CausalMixtures.GibbsState(state_dp=CausalMixtures.StateDP(J=k, alpha=1.0))
         seed_global!()
-        draws = [update!(state, input).state_dp.alpha for _ in 1:M]
+        draws = [update!(Random.default_rng(), state, input).state_dp.alpha for _ in 1:M]
         Ea, Va = alpha_posterior_moments(a, b, k, n)
         ess = ess_batch(draws)
         @test means_match(draws, [Ea]; ess=ess)
@@ -97,7 +97,7 @@ end
                        "fmn" => CausalMixtures.update_fmn_labels!,
                        "blocked" => CausalMixtures.update_blocked_labels!,
                        "marginal" => CausalMixtures.update_marginal_labels!)[model]
-        state = update!(state, input)
+        state = update!(Random.default_rng(), state, input)
         labs = [state.state_dp.labels[i] for i in 1:input.dims.n]
         @test all(l -> l >= 1, labs)
         @test sum(values(state.state_dp.njs)) == input.dims.n

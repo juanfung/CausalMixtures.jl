@@ -1,7 +1,7 @@
 ## benchmark Gaussian model
 export dpm_gaussian!
 
-function dpm_gaussian!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=false)
+function dpm_gaussian!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=false, rng::AbstractRNG=Random.default_rng())
     
     ## sampler parameters
     M = input.params.M
@@ -22,9 +22,9 @@ function dpm_gaussian!(state::GibbsState, input::GibbsInput, out::GibbsOut; test
         
         ## test using observed data as latent data?
         if test
-            state = update_theta!(state, input, 1, 1:input.dims.n)
+            state = update_theta!(rng, state, input, 1, 1:input.dims.n)
         else
-            state = update_gaussian_params!(state, input)
+            state = update_gaussian_params!(rng, state, input)
         end
         
         ## 2. save iteration m draws

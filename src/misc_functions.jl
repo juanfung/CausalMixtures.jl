@@ -81,21 +81,24 @@ function logsumexp(logw::AbstractVector{<:Real})
 end
 
 ## sample an index with probability proportional to exp.(logw), computed stably
-function sample_logweights(logw::AbstractVector{<:Real})
+function sample_logweights(rng::AbstractRNG, logw::AbstractVector{<:Real})
     p = exp.(logw .- logsumexp(logw))
     all(isfinite, p) || error("invalid label log weights: $(logw)")
-    return rand( Distributions.Categorical(p ./ sum(p)) )
+    return rand(rng, Distributions.Categorical(p ./ sum(p)) )
 end
+sample_logweights(logw::AbstractVector{<:Real}) = sample_logweights(Random.default_rng(), logw)
 
 
 ## sample truncated normals at 0, given d = {0, 1}
-function truncnorm(mu::Array, sigma::Array, d::Array)
+truncnorm(mu::Array, sigma::Array, d::Array) = truncnorm(Random.default_rng(), mu, sigma, d)
+
+function truncnorm(rng::AbstractRNG, mu::Array, sigma::Array, d::Array)
     
-    u = rand(size(mu,1))
+    u = rand(rng, size(mu,1))
 
-    c = cdf(Normal(), -mu./sigma)
+    c = cdf.(Normal(), -mu./sigma)
 
-    p = ( c.*(1 - d) + (1 - c).*d ).*u + c.*d
+    p = ( c.*(1 .- d) + (1 .- c).*d ).*u + c.*d
 
     z = mu + sigma.*quantile(Normal(), p)
 

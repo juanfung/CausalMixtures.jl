@@ -2,7 +2,7 @@
 ## DEPRECATED: see the warning in dpm_init and docs/implementation_plan.md (Design A replaces it)
 export dpm_marginal!
 
-function dpm_marginal!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=false)
+function dpm_marginal!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=false, rng::AbstractRNG=Random.default_rng())
     
     ## sampler parameters
     M = input.params.M
@@ -21,7 +21,7 @@ function dpm_marginal!(state::GibbsState, input::GibbsInput, out::GibbsOut; test
             @printf("\nIteration: %d\nUpdating labels...", m + state.state_sampler.batch_m)
         end
         
-        state = update_marginal_labels!(state, input)  # Use the function name I provided
+        state = update_marginal_labels!(rng, state, input)  # Use the function name I provided
         
         ## 2. update theta and latent data
         if verbose && mod(m, max(1, M/10)) == 0
@@ -32,16 +32,16 @@ function dpm_marginal!(state::GibbsState, input::GibbsInput, out::GibbsOut; test
 
         ## test using observed data as latent data?
         if test
-            state = update_marginal_theta_only!(state, input)
+            state = update_marginal_theta_only!(rng, state, input)
         else
-            state = update_marginal_params!(state, input)  # Use the function name I provided
+            state = update_marginal_params!(rng, state, input)  # Use the function name I provided
         end        
         
         ## 3. update alpha?
         if input.priors.prior_dp.alpha_shape != 0.0
             if verbose && mod(m, max(1, M/10)) == 0 @printf("\nUpdating alpha...") end
             
-            state = update_marginal_alpha!(state, input)  # Use the function name I provided
+            state = update_marginal_alpha!(rng, state, input)  # Use the function name I provided
             if verbose && mod(m, max(1, M/10)) == 0 @printf("\nCurrent alpha = %f", state.state_dp.alpha) end            
         end
         

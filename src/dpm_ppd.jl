@@ -5,17 +5,20 @@ export dpm_ppd, rand_ppd, rand_dpm, rand_blocked, rand_gaussian, dpm_ate, ppd_de
 ## dpm_ppd: posterior predictive draws for the Polya-urn (dpm) output at a new unit.
 ## The design is built by column name (ppd_design), as in rand_ppd; the draws come from rand_dpm.
 ## prior_theta defaults to the one the sampler used.
-dpm_ppd(out::GibbsOut, input::GibbsInput, znew::AbstractVector{<:Real};
+## Every PPD function takes an optional rng first (default: the global RNG).
+dpm_ppd(rng::AbstractRNG, out::GibbsOut, input::GibbsInput, znew::AbstractVector{<:Real};
         prior_theta::PriorTheta=input.priors.prior_theta) =
-    rand_dpm(out, prior_theta, ppd_design(input, znew))
+    rand_dpm(rng, out, prior_theta, ppd_design(input, znew))
 
-dpm_ppd(out::GibbsOut, input::GibbsInput, xnew::AbstractVector{<:Real}, wnew::AbstractVector{<:Real};
+dpm_ppd(rng::AbstractRNG, out::GibbsOut, input::GibbsInput, xnew::AbstractVector{<:Real}, wnew::AbstractVector{<:Real};
         prior_theta::PriorTheta=input.priors.prior_theta) =
-    rand_dpm(out, prior_theta, ppd_design(input, xnew, wnew))
+    rand_dpm(rng, out, prior_theta, ppd_design(input, xnew, wnew))
+
+dpm_ppd(out::GibbsOut, args...; kw...) = dpm_ppd(Random.default_rng(), out, args...; kw...)
 
 ## --------------------------------------------------------------------------- #
 ## sample latent data from posterior
-function rand_dpm(out::GibbsOut, p::PriorTheta, hnew::SparseMatrixCSC{Float64,Int64}; 
+function rand_dpm(rng::AbstractRNG, out::GibbsOut, p::PriorTheta, hnew::SparseMatrixCSC{Float64,Int64}; 
                   component_filter::Function = j -> true)  # Default: use all components
     ## setup...
     rho = p.prior_Sigma.rho
@@ -34,18 +37,18 @@ function rand_dpm(out::GibbsOut, p::PriorTheta, hnew::SparseMatrixCSC{Float64,In
         for j in 1:J
             if component_filter(j) && njs[j] > 0  # Apply filter
                 hb = hnew*theta[j].beta
-                append!( ynew, hb + cholesky(theta[j].Sigma).U'*randn(3) )
+                append!( ynew, hb + cholesky(theta[j].Sigma).U'*randn(rng, 3) )
                 push!( w, njs[j] )
             end
         end 
         ## draw from prior
-        Sigma = NobileWishart(rho, rhoR)
-        beta = mu + Lcov*randn(length(mu))
+        Sigma = NobileWishart(rng, rho, rhoR)
+        beta = mu + Lcov*randn(rng, length(mu))
         hb = hnew*beta
-        append!( ynew, hb + cholesky(Sigma).U'*randn(3) )
+        append!( ynew, hb + cholesky(Sigma).U'*randn(rng, 3) )
         push!( w, alpha )
         ## select component
-        jm = rand( Distributions.Categorical(w/sum(w)) )
+        jm = rand(rng, Distributions.Categorical(w/sum(w)) )
         append!( ynew_out, ynew[(3*(jm-1)+1):3*jm] )
         ## reset storage
         resize!(ynew, 0)
@@ -54,7 +57,7 @@ function rand_dpm(out::GibbsOut, p::PriorTheta, hnew::SparseMatrixCSC{Float64,In
     return reshape(ynew_out, 3, length(out.out_dp))
 end
 
-function rand_blocked(out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64}) # also works for fmn
+function rand_blocked(rng::AbstractRNG, out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64}) # also works for fmn
     ## setup...
     ## pre-allocate storage
     ynew_out = Array{Float64}(undef, 0)
@@ -66,10 +69,10 @@ function rand_blocked(out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64}) # als
         for j in keys(ws)
             wj = ws[j].w
             hb = hnew * theta[j].beta
-            append!( ynew, hb + cholesky(theta[j].Sigma).U'*randn(3) )
+            append!( ynew, hb + cholesky(theta[j].Sigma).U'*randn(rng, 3) )
             push!( w, wj )
         end
-        jm = rand( Distributions.Categorical(w/sum(w)) )
+        jm = rand(rng, Distributions.Categorical(w/sum(w)) )
         append!( ynew_out, ynew[(3*(jm-1)+1):3*jm] )
         ## reset storage
         resize!(ynew, 0)
@@ -78,7 +81,7 @@ function rand_blocked(out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64}) # als
     return reshape(ynew_out, 3, length(out.out_dp)) 
 end
 
-function rand_fmn(out::GibbsOut, input::GibbsInput, hnew::SparseMatrixCSC{Float64,Int64})
+function rand_fmn(rng::AbstractRNG, out::GibbsOut, input::GibbsInput, hnew::SparseMatrixCSC{Float64,Int64})
     ## setup...
     J = input.priors.prior_dp.J
     aJ = input.priors.prior_dp.alpha/float(J)
@@ -91,10 +94,10 @@ function rand_fmn(out::GibbsOut, input::GibbsInput, hnew::SparseMatrixCSC{Float6
         njs = out.out_dp[m].njs
         for j in 1:J
             hb = hnew * theta[j].beta
-            append!( ynew, hb + cholesky(theta[j].Sigma).U'*randn(3) )
+            append!( ynew, hb + cholesky(theta[j].Sigma).U'*randn(rng, 3) )
             push!( w, njs[j] + aJ )
         end
-        jm = rand( Distributions.Categorical(w/sum(w)) )
+        jm = rand(rng, Distributions.Categorical(w/sum(w)) )
         append!( ynew_out, ynew[(3*(jm-1)+1):3*jm] )
         ## reset storage
         resize!(ynew, 0)
@@ -103,19 +106,28 @@ function rand_fmn(out::GibbsOut, input::GibbsInput, hnew::SparseMatrixCSC{Float6
     return reshape(ynew_out, 3, length(out.out_dp))            
 end
 
-function rand_gaussian(out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64})
+function rand_gaussian(rng::AbstractRNG, out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64})
     ## setup...
     ## pre-allocate storage
     ynew_out = Array{Float64}(undef, 0)
     ynew = Array{Float64}(undef, 0)
     for m in 1:length(out.out_dp)
         hb = hnew * out.out_theta[m][1].beta
-        append!( ynew_out, hb + cholesky(out.out_theta[m][1].Sigma).U'*randn(3) )
+        append!( ynew_out, hb + cholesky(out.out_theta[m][1].Sigma).U'*randn(rng, 3) )
         ## reset storage
         resize!(ynew, 0)
     end
     return reshape(ynew_out, 3, length(out.out_dp))
 end
+
+## --------------------------------------------------------------------------- #
+## global-RNG methods
+rand_dpm(out::GibbsOut, p::PriorTheta, hnew::SparseMatrixCSC{Float64,Int64}; kw...) =
+    rand_dpm(Random.default_rng(), out, p, hnew; kw...)
+rand_blocked(out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64}) = rand_blocked(Random.default_rng(), out, hnew)
+rand_fmn(out::GibbsOut, input::GibbsInput, hnew::SparseMatrixCSC{Float64,Int64}) =
+    rand_fmn(Random.default_rng(), out, input, hnew)
+rand_gaussian(out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64}) = rand_gaussian(Random.default_rng(), out, hnew)
 
 ## --------------------------------------------------------------------------- #
 ## covariates for the posterior predictive
@@ -161,24 +173,26 @@ function ppd_design(input::GibbsInput, znew::AbstractVector{<:Real})
     return ppd_design(input, znew[idx], znew)
 end
 
-rand_ppd(out::GibbsOut, input::GibbsInput, znew::AbstractVector{<:Real}) =
-    rand_ppd(out, input, ppd_design(input, znew))
+rand_ppd(rng::AbstractRNG, out::GibbsOut, input::GibbsInput, znew::AbstractVector{<:Real}) =
+    rand_ppd(rng, out, input, ppd_design(input, znew))
 
-rand_ppd(out::GibbsOut, input::GibbsInput, xnew::AbstractVector{<:Real}, wnew::AbstractVector{<:Real}) =
-    rand_ppd(out, input, ppd_design(input, xnew, wnew))
+rand_ppd(rng::AbstractRNG, out::GibbsOut, input::GibbsInput, xnew::AbstractVector{<:Real}, wnew::AbstractVector{<:Real}) =
+    rand_ppd(rng, out, input, ppd_design(input, xnew, wnew))
 
-function rand_ppd(out::GibbsOut, input::GibbsInput, hnew::SparseMatrixCSC{Float64,Int64})
+rand_ppd(out::GibbsOut, input::GibbsInput, args...) = rand_ppd(Random.default_rng(), out, input, args...)
+
+function rand_ppd(rng::AbstractRNG, out::GibbsOut, input::GibbsInput, hnew::SparseMatrixCSC{Float64,Int64})
     if input.params.model == "dpm"
-        ppd = rand_dpm(out, input.priors.prior_theta, hnew)
+        ppd = rand_dpm(rng, out, input.priors.prior_theta, hnew)
     elseif input.params.model == "marginal"
-        ppd = rand_dpm(out, input.priors.prior_theta, hnew, 
+        ppd = rand_dpm(rng, out, input.priors.prior_theta, hnew, 
                        component_filter = j -> out.out_dp[end].njs[j] > 0)
     elseif input.params.model == "blocked"
-        ppd = rand_blocked(out, hnew)
+        ppd = rand_blocked(rng, out, hnew)
     elseif input.params.model == "fmn"
-        ppd = rand_fmn(out, input, hnew)
+        ppd = rand_fmn(rng, out, input, hnew)
     elseif input.params.model == "gaussian"
-        ppd = rand_gaussian(out, hnew)
+        ppd = rand_gaussian(rng, out, hnew)
     else
         error("No method for model $(input.params.model)!")
     end

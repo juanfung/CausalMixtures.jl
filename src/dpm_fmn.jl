@@ -1,7 +1,7 @@
 ## Gibbs sampler for FMN model
 export dpm_fmn!
 
-function dpm_fmn!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=false)
+function dpm_fmn!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=false, rng::AbstractRNG=Random.default_rng())
     
     ## sampler parameters
     M = input.params.M
@@ -20,16 +20,16 @@ function dpm_fmn!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=fals
             @printf("\nIteration: %d\nUpdating labels...", m + state.state_sampler.batch_m )
         end
         
-        state = update_fmn_labels!(state, input)
+        state = update_fmn_labels!(rng, state, input)
         
         ## 2. update theta and latent data
         if verbose && mod(m, max(1, M/10)) == 0 @printf("\nUpdating component parameters and latent data...") end
         
         ## test using observed data as latent data?
         if test
-            state = update_theta_only!(state, input)
+            state = update_theta_only!(rng, state, input)
         else
-            state = update_params!(state, input)
+            state = update_params!(rng, state, input)
         end
         
         ## 3. save iteration m draws

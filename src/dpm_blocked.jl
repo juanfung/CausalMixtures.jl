@@ -1,7 +1,7 @@
 ## blocked sampler for DPM
 export dpm_blocked!
 
-function dpm_blocked!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=false)
+function dpm_blocked!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=false, rng::AbstractRNG=Random.default_rng())
     
     ## sampler parameters
     M = input.params.M
@@ -20,7 +20,7 @@ function dpm_blocked!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=
             @printf("\nIteration: %d\nUpdating labels...", m + state.state_sampler.batch_m )
         end
         
-        state = update_blocked_labels!(state, input)
+        state = update_blocked_labels!(rng, state, input)
         
         ## 2. update theta and latent data
         if verbose && mod(m, max(1, M/10)) == 0
@@ -31,9 +31,9 @@ function dpm_blocked!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=
 
         ## test using observed data as latent data?
         if test
-            state = update_blocked_theta_only!(state, input)
+            state = update_blocked_theta_only!(rng, state, input)
         else
-            state = update_blocked_params!(state, input)
+            state = update_blocked_params!(rng, state, input)
         end        
         
         ## 3. update alpha?
@@ -41,7 +41,7 @@ function dpm_blocked!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=
             if verbose && mod(m, max(1, M/10)) == 0 @printf("\nUpdating alpha...") end
             
             ## sample alpha
-            state = update_blocked_alpha!(state, input)
+            state = update_blocked_alpha!(rng, state, input)
             if verbose && mod(m, max(1, M/10)) == 0 @printf("\nCurrent alpha = %f", state.state_dp.alpha) end            
         end
         

@@ -114,7 +114,7 @@ end
     N = 20_000
     B = zeros(N, input.dims.ktot); Z = zeros(N, input.dims.ktot)
     for r in 1:N
-        CausalMixtures.update_theta!(state, input, 1, idx)
+        CausalMixtures.update_theta!(Random.default_rng(), state, input, 1, idx)
         th = state.state_theta[1]
         Sinv = inv(th.Sigma)
         V = inv(H' * kron(Sinv, I(n)) * H + pb.V)
@@ -123,6 +123,38 @@ end
     end
     @test maximum(abs, mean(Z, dims=1)) < 4.5 / sqrt(N)
     @test cov(Z) ≈ I atol = 0.05
+end
+
+@testset "explicit rng: reproducible and independent of the global RNG" begin
+    data = generate_hedonic_data(60, 9)
+    raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
+    function run(model, seed, global_seed)
+        Random.seed!(global_seed)
+        rng = Xoshiro(seed)
+        params = CausalMixtures.InputParams(M=6, scale_data=(true, true), verbose=false, model=model)
+        priors = setup_default_priors(2, 3, J = model == "gaussian" ? 1 : 5)
+        state, input, out = CausalMixtures.dpm!(CausalMixtures.dpm_init(raw, priors, params; rng=rng)...; rng=rng)
+        ## continue the chain, then the PPD
+        state, input, out = CausalMixtures.dpm!(state, input, out; rng=rng)
+        ppd = rand_ppd(rng, out, input, mean_covariates(input)...)
+        g = rand()  # the global RNG must be untouched by all of the above
+        return [t.beta for th in out.out_theta for t in th], [dp.alpha for dp in out.out_dp], ppd, g
+    end
+    for model in ("dpm", "blocked", "fmn", "gaussian", "marginal")
+        a = run(model, 1, 100)
+        b = run(model, 1, 200)
+        @test a[1] == b[1] && a[2] == b[2] && a[3] == b[3]
+        Random.seed!(100); @test a[4] == rand()
+        c = run(model, 2, 100)
+        @test a[1] != c[1]
+    end
+    ## dpm_ppd with an rng
+    params = CausalMixtures.InputParams(M=4, scale_data=(true, true), verbose=false, model="dpm")
+    rng = Xoshiro(3)
+    state, input, out = CausalMixtures.dpm!(CausalMixtures.dpm_init(raw, setup_default_priors(2, 3, J=3), params; rng=rng)...; rng=rng)
+    w = mean_covariates(input)[2]
+    @test dpm_ppd(Xoshiro(4), out, input, w) == dpm_ppd(Xoshiro(4), out, input, w)
+    @test CausalMixtures.sample_logweights(Xoshiro(5), [0.0, 1.0]) == CausalMixtures.sample_logweights(Xoshiro(5), [0.0, 1.0])
 end
 
 end # Phase 3 refactor
