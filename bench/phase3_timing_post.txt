@@ -1,0 +1,9 @@
+julia 1.12.0, threads = 1, label = post
+| Code | Prior | Model | Time (s) | ms / iter | GC | Allocated | Mean J |
+|---|---|---|---|---|---|---|---|
+| post | C0 | `dpm` | 2.36 | 2.36 | 12.7% | 5.89 GiB | 12.90 |
+| post | C0 | `blocked` | 0.44 | 0.44 | 5.1% | 0.55 GiB | 2.43 |
+| post | C0 | `gaussian` | 0.07 | 0.07 | 0.0% | 0.08 GiB | 1.00 |
+| post | C3 | `dpm` | 2.21 | 2.21 | 13.2% | 5.72 GiB | 6.53 |
+| post | C3 | `blocked` | 0.42 | 0.42 | 5.6% | 0.59 GiB | 6.29 |
+| post | C3 | `gaussian` | 0.07 | 0.07 | 0.0% | 0.08 GiB | 1.00 |

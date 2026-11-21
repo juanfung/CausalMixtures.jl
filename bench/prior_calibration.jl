@@ -145,7 +145,8 @@ function run_blocked(df, s::PriorSpec; seed=SEED)
     rawd = CausalMixtures.RawData(@formula(Y_obs ~ X), @formula(D_obs ~ X + Z), df)
     Random.seed!(seed)
     st, ip, ot = CausalMixtures.dpm_init(rawd, to_inputpriors(s, 2, 3),
-                     CausalMixtures.InputParams(M=M_ITER, scale_data=(true, true), verbose=false, model="blocked"))
+                     CausalMixtures.InputParams(M=M_ITER, scale_data=(true, true), verbose=false, model="blocked",
+                                                latent_thin=1))  # labels are needed for `sep`
     t = @elapsed (st, ip, ot = CausalMixtures.dpm!(st, ip, ot))
     kz, kxx = ip.dims.kz, ip.dims.kx
     xb = mean_covariates(ip)[1]
@@ -154,7 +155,7 @@ function run_blocked(df, s::PriorSpec; seed=SEED)
     dv = ip.data.d
     nn = ip.dims.n
     for m in (BURN+1):M_ITER
-        dp, th = ot.out_dp[m], ot.out_theta[m]
+        dp, th, labs = ot.out_dp[m], ot.out_theta[m], ot.out_labels[m]
         eff(j) = dot(xb, th[j].beta[kz+1:kz+kxx] - th[j].beta[kz+kxx+1:end])
         push!(occ, count(>(0), values(dp.njs)))
         push!(ateG, sy * sum(dp.ws[j].w * eff(j) for j in keys(dp.ws)))
@@ -163,7 +164,7 @@ function run_blocked(df, s::PriorSpec; seed=SEED)
         ## share of units in clusters that are < 5% or > 95% treated (missing arm prior-driven)
         tr = Dict{Int,Int}()
         for i in 1:nn
-            tr[dp.labels[i]] = get(tr, dp.labels[i], 0) + dv[i]
+            tr[labs[i]] = get(tr, labs[i], 0) + dv[i]
         end
         push!(sep, sum(dp.njs[j] for j in keys(tr) if !(0.05 <= tr[j] / dp.njs[j] <= 0.95); init=0) / nn)
     end

@@ -11,7 +11,7 @@ J. Appl. Econ., 19: 203-225. https://doi.org/10.1002/jae.731
 
 ### 1. Generate/Prepare Data
 ```julia
-using CausalMixtures
+using CausalMixtures, Random
 
 # Option A: Use simulation utility (for testing)
 data = CausalMixtures.generate_hedonic_data(500, 1234)  # n=500, seed=1234
@@ -44,13 +44,16 @@ params = InputParams(
     M=1000,                    # MCMC iterations
     scale_data=(true,true),    # Scale data
     verbose=true,              # Show progress
-    model="blocked"            # ✅ RELIABLE (or "dpm")
+    model="blocked",           # ✅ RELIABLE (or "dpm")
     # model="marginal"         # ❌ UNSTABLE - avoid!
+    thin=1,                    # save (theta_j, n_j, alpha) every thin-th iteration
+    latent_thin=0              # save latent data and labels every k-th iteration (0 = never)
 )
 
-# Initialize and run
-init = dpm_init(raw_data, priors, params)
-state, input, output = dpm!(init...)
+# Initialize and run, with an explicit random number generator (default: the global RNG)
+rng = Xoshiro(2026)
+init = dpm_init(raw_data, priors, params; rng=rng)
+state, input, output = dpm!(init...; rng=rng)
 ```
 
 ### 4. Calculate Treatment Effects
@@ -59,7 +62,7 @@ state, input, output = dpm!(init...)
 xbar, wbar = mean_covariates(input)
 
 # Generate posterior predictive draws
-ynew = rand_ppd(output, input, xbar, wbar)
+ynew = rand_ppd(rng, output, input, xbar, wbar)
 
 # Calculate treatment effects
 tes = dpm_ate(ynew, input)
