@@ -10,8 +10,8 @@ using LinearAlgebra
     state_dp = CausalMixtures.StateDP()
     @test state_dp isa CausalMixtures.StateDP
     @test state_dp.J > 0
-    @test state_dp.labels isa Dict
-    @test state_dp.njs isa Dict
+    @test state_dp.labels isa Vector{Int}
+    @test state_dp.njs isa Vector{Int}
     @test state_dp.alpha == 1.0
 end
 
@@ -28,7 +28,7 @@ end
 # This test checks that the StateTheta constructor creates a valid StateTheta object
 @testset "StateTheta constructor" begin
     state_theta = CausalMixtures.StateTheta()
-    @test state_theta isa Dict{Int64, CausalMixtures.Theta}
+    @test state_theta isa Vector{CausalMixtures.Theta}
     for theta in values(state_theta)
         @test theta.beta isa Vector{Float64}
         @test theta.Sigma isa Matrix{Float64}
@@ -50,8 +50,8 @@ end
     state = CausalMixtures.GibbsState(state_dp = state_dp)
     @test state.state_dp isa CausalMixtures.StateDP
     @test state.state_dp.J == 5
-    @test state.state_dp.labels isa Dict
-    @test state.state_dp.njs isa Dict
+    @test state.state_dp.labels isa Vector{Int}
+    @test state.state_dp.njs isa Vector{Int}
     
     # Test with J = 1
     state_dp = CausalMixtures.StateDP(J = 1)
@@ -72,7 +72,7 @@ end
 # This test checks that the state_theta field is initialized correctly
 @testset "state_theta field of GibbsState" begin
     state = CausalMixtures.GibbsState()
-    @test state.state_theta isa Dict{Int64, CausalMixtures.Theta}
+    @test state.state_theta isa Vector{CausalMixtures.Theta}
     for theta in values(state.state_theta)
         @test theta.beta isa Vector{Float64}
         @test theta.Sigma isa Matrix{Float64}

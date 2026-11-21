@@ -211,7 +211,7 @@ end
         th = out_xz.out_theta[m][1]
         b = copy(th.beta)
         b[1:kz] = th.beta[perm]
-        out_zx.out_theta[m] = CausalMixtures.StateTheta(1 => CausalMixtures.Theta(b, th.Sigma))
+        out_zx.out_theta[m] = [CausalMixtures.Theta(b, th.Sigma)]
         out_zx.out_dp[m] = out_xz.out_dp[m]
         out_zx.out_data[m] = out_xz.out_data[m]
     end

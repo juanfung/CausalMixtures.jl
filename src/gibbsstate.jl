@@ -26,33 +26,51 @@ function sumbw(b::Base.ValueIterator{T}; i::Int64=1) where T<:AbstractDict
 end
 
 ## collect DP state
+## Components are indexed 1:length(njs). labels[i] is unit i's component, njs[j] its count, and
+## members[j] the sorted units in component j (rebuilt after every label sweep, so the parameter
+## step never scans the labels). ws holds the stick-breaking weights (blocked sampler only).
 mutable struct StateDP
     J::Int64 # number of active components
-    labels::Dict{Int64,Int64} # individual component membership
-    njs::Dict{Int64,Int64} # component membership counts
-    ws::DataStructures.OrderedDict{Int64,BlockedWeights} # stick-breaking weights
+    labels::Vector{Int64} # individual component membership
+    njs::Vector{Int64} # component membership counts
+    ws::Vector{BlockedWeights} # stick-breaking weights
     alpha::Float64 # concentration parameter
     eta::Float64 # auxiliary variable for sampling alpha
-    StateDP(J::Int64, labels::Dict{Int64,Int64}, njs::Dict{Int64,Int64}, ws::DataStructures.OrderedDict{Int64,BlockedWeights}, alpha::Float64, eta::Float64) = new(J, labels, njs, ws, alpha, eta)
+    members::Vector{Vector{Int64}} # units in each component
 end
+
+StateDP(J::Integer, labels::AbstractVector, njs::AbstractVector, ws::AbstractVector, alpha::Real, eta::Real) =
+    StateDP(J, labels, njs, ws, alpha, eta, Vector{Int64}[])
 
 ## outer constructor
 StateDP(; J=2,
-        labels=Dict{Int64,Int64}(),
-        njs=Dict{Int64,Int64}(),
-        ws=DataStructures.OrderedDict{Int64,BlockedWeights}(),
+        labels=Int64[],
+        njs=Int64[],
+        ws=BlockedWeights[],
         alpha=1.0,
-        eta=0.0) = StateDP(J, labels, njs, ws, alpha, eta)
-
-## default constructor
-##StateDP(; J=2, labels=Dict{Int64,Int64}(), njs=Dict{Int64,Int64}(), alpha=1.0, eta=0.0) =
-##    StateDP(J, labels, njs, alpha, eta)
+        eta=0.0,
+        members=Vector{Int64}[]) = StateDP(J, labels, njs, ws, alpha, eta, members)
 
 ## copy method
-Base.copy(m::StateDP) = StateDP([ copy(getfield(m, k)) for k = 1:length(fieldnames(typeof(m))) ]...)
+Base.copy(m::StateDP) = StateDP(m.J, copy(m.labels), copy(m.njs), copy(m.ws), m.alpha, m.eta, copy.(m.members))
 
-## collect theta state, where theta = beta-Sigma pair
-mutable struct Theta
+## rebuild the member lists from the labels: one pass over the units
+function rebuild_members!(s::StateDP)
+    K = length(s.njs)
+    length(s.members) == K || resize!(s.members, K)
+    @inbounds for j in 1:K
+        isassigned(s.members, j) ? empty!(s.members[j]) : (s.members[j] = Int64[])
+        sizehint!(s.members[j], s.njs[j])
+    end
+    @inbounds for (i, l) in enumerate(s.labels)
+        push!(s.members[l], i)
+    end
+    return s
+end
+
+## collect theta state, where theta = beta-Sigma pair. Immutable: the samplers replace a
+## component's Theta rather than change it, so saved draws can share it without copying.
+struct Theta
     beta::Vector{Float64} # latent data mean vector
     Sigma::Matrix{Float64} # latent data covariance matrix
 end
@@ -65,7 +83,19 @@ Theta(; beta=zeros(2), Sigma=Matrix{Float64}(I, 2, 2)) = Theta(beta,Sigma)
 ##end
 
 ##StateTheta(; state_theta=Dict{Int64,Theta}() ) = StateTheta(state_theta)
-StateTheta = Dict{Int64,Theta}
+StateTheta = Vector{Theta}
+
+## set component j of a StateTheta, growing it by one if j is the next index
+function setcomp!(v::Vector, j::Integer, x)
+    if j == length(v) + 1
+        push!(v, x)
+    elseif 1 <= j <= length(v)
+        v[j] = x
+    else
+        throw(BoundsError(v, j))
+    end
+    return v
+end
 
 mutable struct NjTheta
     nj::Int64

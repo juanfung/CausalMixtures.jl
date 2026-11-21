@@ -22,9 +22,9 @@ using .TestHelpers
     out_zx = CausalMixtures.GibbsOut(params.M)
     for m in 1:params.M
         th = CausalMixtures.StateTheta()
-        for (j, t) in out_xz.out_theta[m]
+        for t in out_xz.out_theta[m]
             b = copy(t.beta); b[1:kz] = t.beta[perm]
-            th[j] = CausalMixtures.Theta(b, t.Sigma)
+            push!(th, CausalMixtures.Theta(b, t.Sigma))
         end
         out_zx.out_theta[m] = th
         out_zx.out_dp[m] = out_xz.out_dp[m]
@@ -70,10 +70,9 @@ end
     ## one component holds every unit and alpha is tiny: Beta(1 + 500, alpha + 0) rounds to 1.0,
     ## which made log(1 - v) = -Inf and Gamma(shape, 1/Inf) throw a DomainError
     J = 20
-    njs = Dict(j => (j == 1 ? 500 : 0) for j in 1:J)
-    dp = CausalMixtures.StateDP(J=J, labels=Dict(i => 1 for i in 1:500), njs=njs,
-            ws=CausalMixtures.DataStructures.OrderedDict(j => CausalMixtures.BlockedWeights() for j in 1:J),
-            alpha=1e-3, eta=0.0)
+    njs = [j == 1 ? 500 : 0 for j in 1:J]
+    dp = CausalMixtures.StateDP(J=J, labels=ones(Int, 500), njs=njs,
+            ws=fill(CausalMixtures.BlockedWeights(), J), alpha=1e-3, eta=0.0)
     input = CausalMixtures.GibbsInput(dims=CausalMixtures.InputDims(n=500),
             priors=CausalMixtures.InputPriors(prior_dp=CausalMixtures.PriorDP(J=J, alpha=1.0,
                                               alpha_shape=2.0, alpha_rate=2.0)))
@@ -86,7 +85,7 @@ end
         CausalMixtures.update_blocked_alpha!(st, input)
         @test isfinite(st.state_dp.alpha) && st.state_dp.alpha > 0
     end
-    @test sum(w.w for w in values(st.state_dp.ws)) ≈ 1
+    @test sum(w.w for w in st.state_dp.ws) ≈ 1
 end
 
 end # Phase 1 follow-ups

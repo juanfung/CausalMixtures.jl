@@ -3,60 +3,46 @@
 ## --------------------------------------------------------------------------- #
 ## main sampler functions
 
-## update component labels and number of components
+## update component labels and number of components.
+## A component emptied during the sweep keeps its slot (njs = 0, skipped by sample_label!) and
+## a new component reuses a free slot; the occupied components are relabelled 1:k at the end.
+## This is the same Polya-urn kernel as removing the component at once, without the O(n)
+## relabelling scan each time a component empties.
 function update_labels!(state::GibbsState, input::GibbsInput)
-    ## update component labels for each i
+    dp = state.state_dp
     @inbounds for i in 1:input.dims.n
-        ji = copy( state.state_dp.labels[i] ) # i's current component        
-        state.state_dp.labels[i] = 0 # remove i from component ji
-        state.state_dp.njs[ji] = state.state_dp.njs[ji] - 1 # decrease ji count
-        ## remove empty component!
-        if state.state_dp.njs[ji] == 0
-            state = remove_component!(state, ji)
-        end
+        ji = dp.labels[i]
+        dp.labels[i] = 0 # remove i from component ji
+        dp.njs[ji] -= 1
         ## sample component label
         state = sample_label!(state, input, i)
     end
+    compact_components!(state)
     return state
 end
 
-## remove empty component and relabel components
-function remove_component!(state::GibbsState, ji::Int64)    
-    ## 1. shift labels
-    state.state_dp = shift_labels!(state.state_dp, ji)    
-    ## 2. update counts    
-    state.state_dp = shift_njs!(state.state_dp, ji)    
-    ## 3. shift components
-    state.state_theta = shift_theta!(state.state_theta, ji)    
-    ## 4. shift J
-    state.state_dp.J -= 1
+## drop empty components, relabel the occupied ones 1:k in their current order, rebuild members
+function compact_components!(state::GibbsState)
+    dp = state.state_dp
+    K = length(dp.njs)
+    newlab = zeros(Int64, K)
+    k = 0
+    @inbounds for j in 1:K
+        if dp.njs[j] > 0
+            k += 1
+            newlab[j] = k
+            dp.njs[k] = dp.njs[j]
+            state.state_theta[k] = state.state_theta[j]
+        end
+    end
+    resize!(dp.njs, k)
+    resize!(state.state_theta, k)
+    @inbounds for i in eachindex(dp.labels)
+        dp.labels[i] = newlab[dp.labels[i]]
+    end
+    dp.J = k
+    rebuild_members!(dp)
     return state
-end
-
-function shift_labels!(state_dp::StateDP, ji::Int64)
-    ##for ii in collect(keys(state_dp.labels))[collect(values(state_dp.labels)) .> ji]
-    @inbounds for ii in keys(state_dp.labels)
-        if state_dp.labels[ii] > ji
-            state_dp.labels[ii] -= 1
-        end        
-    end    
-    return state_dp
-end
-
-function shift_njs!(state_dp::StateDP, ji::Int64)
-    @inbounds for j in ji:(length(state_dp.njs) - 1)
-        state_dp.njs[j] = state_dp.njs[j+1]
-    end
-    pop!(state_dp.njs, length(state_dp.njs))
-    return state_dp
-end
-
-function shift_theta!(state_theta::StateTheta, ji::Int64)
-    @inbounds for j in ji:(length(state_theta) - 1)
-        state_theta[j] = state_theta[j+1]
-    end
-    pop!(state_theta, length(state_theta))
-    return state_theta
 end
 
 ## sample new theta from prior predictive
@@ -116,32 +102,42 @@ function sample_label!(state::GibbsState, input::GibbsInput, i::Int64)
     ## Prob(label i = existing component)
     Hi = input.data.Hmat[vcat(i, i+input.dims.n, i+2*input.dims.n), :] # 3 x ktot
     yi = [state.state_data.dstar[i], state.state_data.y1[i], state.state_data.y0[i]] # 3 x 1
-    ## log weights; the common factor 1/zdenom cancels
-    logw = Array{Float64}(undef, state.state_dp.J)
-    @inbounds for j in 1:state.state_dp.J
-        logw[j] = log( state.state_dp.njs[j] ) + prob_theta(state.state_theta[j], Hi, yi)
+    ## log weights over the occupied components (empty slots get -Inf); the common factor
+    ## 1/zdenom cancels
+    dp = state.state_dp
+    K = length(dp.njs)
+    logw = Array{Float64}(undef, K + 1)
+    free = 0
+    @inbounds for j in 1:K
+        if dp.njs[j] > 0
+            logw[j] = log( dp.njs[j] ) + prob_theta(state.state_theta[j], Hi, yi)
+        else
+            logw[j] = -Inf
+            free == 0 && (free = j)
+        end
     end
     
     ## Prob(label i = new component)
     theta_j = sample_new_theta(input.priors.prior_theta, state, Hi, yi)
-    push!(logw, log( state.state_dp.alpha ) + prob_theta(theta_j, Hi, yi))
+    logw[K + 1] = log( dp.alpha ) + prob_theta(theta_j, Hi, yi)
     
     ## sample component
     ji = sample_logweights(logw)
-    state.state_dp.labels[i] = ji
-    ## setindex!(state.state_dp.labels, ji, i)
     
-    ## update J
-    if ji == state.state_dp.J + 1
-        state.state_dp.J += 1
-        ##state.state_dp.njs[ji] = 0
-        get!(state.state_dp.njs, ji, 0)
-        ##state.state_theta[ji] = theta_j
-        get!(state.state_theta, ji, theta_j)
+    ## a new component goes into a free slot if there is one
+    if ji == K + 1
+        if free > 0
+            ji = free
+            state.state_theta[ji] = theta_j
+        else
+            push!(dp.njs, 0)
+            push!(state.state_theta, theta_j)
+        end
     end
+    dp.labels[i] = ji
     
     ## update counts
-    state.state_dp.njs[ji] +=  1
+    dp.njs[ji] += 1
 
     return state
 
@@ -154,7 +150,7 @@ function update_params!(state::GibbsState, input::GibbsInput)
         
         if state.state_dp.njs[j] == 0 continue end
         
-        idx = sort( collect( keys( ( filter( v -> v.second == j, state.state_dp.labels ) ) ) ) )
+        idx = state.state_dp.members[j]
         Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n), :] # 3nj x ktot
         
         ## update theta
@@ -361,6 +357,7 @@ function update_fmn_labels!(state::GibbsState, input::GibbsInput)
         ## sample component label
         state = sample_fmn_label!(state, input, i)
     end
+    rebuild_members!(state.state_dp)
     return state
 end
 
@@ -384,28 +381,10 @@ end
 ## --------------------------------------------------------------------------- #
 ## specialized functions for blocked sampler
 
-## update stick-breaking weights, v.1
-function update_weights!(state::GibbsState, input::GibbsInput)
-    ##for j in sort(collect(keys(filter( (k,v) -> k < state.state_dp.J, state.state_dp.njs ))))
-    v, w = ones(state.state_dp.J), zeros(state.state_dp.J)
-    for j in 1:state.state_dp.J # for j in sort(collect(keys(state.state_dp.njs)))
-        if j < state.state_dp.J
-            njj = sum( values( filter( k -> k.first > j, state.state_dp.njs) ) )
-            ##njj = reduce(+, drop( values(state.state_dp.njs), j ) ).nj
-            ##state.state_dp.njs[j].v =
-            v[j] = rand( Distributions.Beta( 1 + state.state_dp.njs[j], state.state_dp.alpha + njj ) )
-        end
-        w[j] = v[j]*prod(1 - v[1:j-1])
-        ##state.state_dp.njs[j].w = state.state_dp.njs[j].v*prod( map( v -> 1 - v, take(values(state.state_dp.njs), j-1) ) ).v
-        setindex!(state.state_dp.weights, BlockedWeights(w[j], v[j]), j)
-    end
-    return state
-end
-
 ## another approach
 function compute_v(s::StateDP, j::Int64)
     if j < length(s.njs)
-        njj = sum( values( filter( k -> k.first > j, s.njs) ) )
+        njj = sum( @view s.njs[(j+1):end] )
         v = rand( Distributions.Beta( 1 + s.njs[j], s.alpha + njj))
         ## a Beta draw can round to exactly 1.0 when alpha + njj is tiny; keep 1 - v > 0 so that
         ## log(1 - v) in update_blocked_alpha! stays finite (-36.7 at the cap)
@@ -418,7 +397,7 @@ end
 
 ## w_j = v_j * prod_{l<j} (1 - v_l), using the already-updated v_1..v_{j-1}
 function compute_w(s::StateDP, j::Int64, v::Float64)
-    return (j == 1) ? v : v * prod( 1 - b.v for b in take(values(s.ws), j-1) )
+    return (j == 1) ? v : v * prod( 1 - s.ws[l].v for l in 1:(j-1) )
 end
 
 ## store a new BlockedWeights object: saved copies of earlier states must not see this update
@@ -430,6 +409,7 @@ end
 
 ## update stick-breaking weights, v.2
 function compute_weights!(state_dp::StateDP)
+    length(state_dp.ws) == length(state_dp.njs) || resize!(state_dp.ws, length(state_dp.njs))
     for j in 1:length(state_dp.njs)
         state_dp = update_ws!(state_dp, j)
     end
@@ -443,6 +423,7 @@ function update_blocked_labels!(state::GibbsState, input::GibbsInput)
 
     state.state_dp = compute_weights!(state.state_dp)
     state.state_dp = update_J!(state.state_dp)
+    rebuild_members!(state.state_dp)
     return state
 end
 
@@ -466,7 +447,7 @@ end
 
 ## montitor number of active components
 function update_J!(s::StateDP)
-    s.J = length( filter( v -> v.second != 0, s.njs) )
+    s.J = count( >(0), s.njs )
     return s
 end
 
@@ -475,7 +456,7 @@ function sample_prior_theta!(state_theta::StateTheta, prior_theta::PriorTheta, j
     ## beta ~ N(mu, V0): use the covariance factor, not the precision stored in prior_beta.V
     beta_j = prior_theta.prior_beta.mu + prior_theta.prior_beta.Lcov*randn(length(prior_theta.prior_beta.mu))
     Sigma_j = NobileWishart(prior_theta.prior_Sigma.rho, prior_theta.prior_Sigma.rho * prior_theta.prior_Sigma.R )
-    state_theta[j] = Theta(beta=beta_j, Sigma=Sigma_j)
+    setcomp!(state_theta, j, Theta(beta=beta_j, Sigma=Sigma_j))
     return state_theta
 end
 
@@ -488,7 +469,7 @@ function update_blocked_params!(state::GibbsState, input::GibbsInput)
             state.state_theta = sample_prior_theta!(state.state_theta, input.priors.prior_theta, j)
         else
             ## sample from posterior
-            idx = sort( collect( keys( ( filter( v -> v.second == j, state.state_dp.labels ) ) ) ) )
+            idx = state.state_dp.members[j]
             Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] # 3nj x ktot        
             ## update theta
             state = update_theta!(state, input, j, idx, Hj)
@@ -500,9 +481,8 @@ function update_blocked_params!(state::GibbsState, input::GibbsInput)
 end
 
 ## update concentration parameter
-function fv(d::OrderedDict{Int64,BlockedWeights}; f::Function=log) #, j::Int64; f::Function=identity)
-    return sum(map(val -> f(1-val.v), take(values(d), length(d)-1)))
-    ##return map(v -> f(1-v), take(values(d), j-1) )
+function fv(d::AbstractVector{BlockedWeights}; f::Function=log)
+    return sum( f(1 - d[j].v) for j in 1:(length(d)-1); init=0.0 )
 end
 
 function update_blocked_alpha!(state::GibbsState, input::GibbsInput)
@@ -521,7 +501,7 @@ end
 function update_latent_only!(state::GibbsState, input::GibbsInput)
     @inbounds for j in 1:state.state_dp.J # k in keys(state.state_theta) or keys(state.state_dp.njs)        
         if state.state_dp.njs[j] == 0 continue end        
-        idx = sort( collect( keys( ( filter( v -> v.second == j, state.state_dp.labels ) ) ) ) )
+        idx = state.state_dp.members[j]
         ##Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] # 3nj x ktot
         ## update latent data
         state = update_ymiss_only!(state, input, j, idx)
@@ -533,7 +513,7 @@ end
 function update_theta_only!(state::GibbsState, input::GibbsInput)
     @inbounds for j in 1:state.state_dp.J # k in keys(state.state_theta) or keys(state.state_dp.njs)        
         if state.state_dp.njs[j] == 0 continue end        
-        idx = sort( collect( keys( ( filter( v -> v.second == j, state.state_dp.labels ) ) ) ) )
+        idx = state.state_dp.members[j]
         Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] # 3nj x ktot        
         ## update theta
         state = update_theta!(state, input, j, idx, Hj)        
@@ -614,7 +594,7 @@ function update_blocked_theta_only!(state::GibbsState, input::GibbsInput)
             state.state_theta = sample_prior_theta!(state.state_theta, input.priors.prior_theta, j)
         else
             ## sample from posterior
-            idx = sort( collect( keys( ( filter( v -> v.second == j, state.state_dp.labels ) ) ) ) )
+            idx = state.state_dp.members[j]
             Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] # 3nj x ktot        
             ## update theta
             state = update_theta!(state, input, j, idx, Hj)
@@ -634,6 +614,7 @@ function update_marginal_labels!(state::GibbsState, input::GibbsInput)
     end
     ## update active component count
     state.state_dp = update_J!(state.state_dp)
+    rebuild_members!(state.state_dp)
     return state
 end
 
@@ -678,7 +659,7 @@ function update_marginal_params!(state::GibbsState, input::GibbsInput)
     @inbounds for j in 1:input.priors.prior_dp.J
         if state.state_dp.njs[j] > 0 # Only update active components
             ## active component - sample from posterior
-            idx = sort(collect(keys(filter(v -> v.second == j, state.state_dp.labels))))
+            idx = state.state_dp.members[j]
             Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n), :] # 3nj x ktot
             
             ## update theta
@@ -719,7 +700,7 @@ function update_marginal_theta_only!(state::GibbsState, input::GibbsInput)
             state.state_theta = sample_prior_theta!(state.state_theta, input.priors.prior_theta, j)
         else
             ## active component - update theta only
-            idx = sort(collect(keys(filter(v -> v.second == j, state.state_dp.labels))))
+            idx = state.state_dp.members[j]
             Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n), :] # 3nj x ktot
             ## update theta
             state = update_theta!(state, input, j, idx, Hj)

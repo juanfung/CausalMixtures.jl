@@ -138,40 +138,29 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     
     ## 2b. initialize DP:
     ## assign component membership uniformly
-    labels = Dict{Int64,Int64}()
-    if priors.prior_dp.J != 1        
-        for i in 1:n
-            labels[i] = rand(1:priors.prior_dp.J)
-        end
-    else
-        for i in 1:n
-            labels[i] = 1
-        end
-    end
-    ## count component memberships, with a (possibly zero) count for every component 1:J
     J = priors.prior_dp.J
+    labels = J != 1 ? [rand(1:J) for i in 1:n] : ones(Int64, n)
     if model == "dpm"
         ## the Polya-urn sampler keeps only occupied components (J = number of clusters),
         ## so relabel the occupied ones as 1:k
-        occupied = sort(unique(values(labels)))
-        relabel = Dict(j => r for (r, j) in enumerate(occupied))
-        for i in 1:n
-            labels[i] = relabel[labels[i]]
-        end
+        occupied = sort(unique(labels))
+        relabel = zeros(Int64, J)
+        relabel[occupied] = 1:length(occupied)
+        labels = relabel[labels]
         J = length(occupied)
     end
-    njs = Dict{Int64,Int64}(j => 0 for j in 1:J)
-    for l in values(labels)
+    ## count component memberships, with a (possibly zero) count for every component 1:J
+    njs = zeros(Int64, J)
+    for l in labels
         njs[l] += 1
     end
-    ## compute stick-breaking weights?
-    ws = DataStructures.OrderedDict{Int64,BlockedWeights}()
     ## collect DP hyperparameters
     ## initialize alpha to prior alpha, eta = 0
-    state_dp = StateDP(J=J, labels=labels, njs=njs, ws=ws, alpha=priors.prior_dp.alpha, eta=0.0)
+    state_dp = StateDP(J=J, labels=labels, njs=njs, ws=BlockedWeights[], alpha=priors.prior_dp.alpha, eta=0.0)
+    rebuild_members!(state_dp)
     if input.params.model == "blocked"
         ## initialize weights
-        for k in sort(collect(keys(state_dp.njs))) get!(state_dp.ws, k, BlockedWeights()) end
+        state_dp.ws = fill(BlockedWeights(), J)
         state_dp = compute_weights!(state_dp)
     elseif input.params.model == "fmn"
         state_dp.alpha = state_dp.alpha / float(state_dp.J)
@@ -179,7 +168,7 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
         
     ## 2c. initialize theta:
     ## sample theta from prior
-    state_theta = Dict{Int64,Theta}()
+    state_theta = StateTheta()
     for j in 1:state_dp.J
         ##beta_j = priors.prior_theta.prior_beta.mu + chol(priors.prior_theta.prior_beta.V)'*randn(ktot)
         ##Sigma_j = NobileWishart(priors.prior_theta.prior_Sigma.rho,
@@ -250,24 +239,6 @@ function dpm!(state::GibbsState, input::GibbsInput, out::GibbsOut=GibbsOut(0); t
     end    
     return out_tup    
 end
-
-## return to previous state from iteration output
-## TODO: how to recover state.state_sampler?
-function get_state(out::GibbsOut)
-    state = GibbsState(state_data = out.out_data[end],
-                       state_dp = out.out_dp[end],
-                       state_theta = out.out_theta[end])
-    return state
-end
-
-## reset state to iteration m
-function reset_state!(out::GibbsOut, state::GibbsState, m::Int64)
-    state.state_data = out.out_data[m]
-    state.state_dp = out.out_dp[m]
-    state.state_theta = out.out_theta[m]
-    return state
-end
-
 
 ## calls:
 ## 1a. collect raw data, priors, params, setting prior_beta.V = inv(V)
