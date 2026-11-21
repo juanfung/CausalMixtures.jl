@@ -10,7 +10,9 @@ function flip_mat(A::Array) reverse(reverse(A, dims=1), dims=2) end
 
 
 ## sample 3x3 A ~ IW(nu, V) with constraint A(1,1)=1
-function NobileWishart(nu::Int64, V::Array{Float64})
+NobileWishart(nu::Int64, V::Array{Float64}) = NobileWishart(Random.default_rng(), nu, V)
+
+function NobileWishart(rng::AbstractRNG, nu::Int64, V::Array{Float64})
     
     ## lower triangular Cholesky factor for V^-1
     I3 = Matrix(1.0I, 3, 3)
@@ -19,11 +21,11 @@ function NobileWishart(nu::Int64, V::Array{Float64})
 
     ## initialize lower triangular A
     A = zeros(3, 3)
-    A[2,1], A[3,1], A[3,2] = randn(3)
+    A[2,1], A[3,1], A[3,2] = randn(rng, 3)
 
     ## fill in diagonal
-    A[1,1] = sqrt( rand( Chisq(nu)) )
-    A[2,2] = sqrt( rand( Chisq(nu-1)) )
+    A[1,1] = sqrt( rand(rng, Chisq(nu)) )
+    A[2,2] = sqrt( rand(rng, Chisq(nu-1)) )
     A[3,3] = 1/L[3,3]
 
     ## construct out = (L^-1)'(A^-1)'(A^-1)(L^-1)

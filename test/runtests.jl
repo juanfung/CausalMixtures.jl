@@ -27,6 +27,9 @@ result = @testset "CausalMixtures.jl Tests" begin
     include("test_phase1_fixes.jl")
     include("test_phase1_followups.jl")
 
+    # Phase 2 prior predictive simulator
+    include("test_prior_predictive.jl")
+
     # ... include other test files as needed
     
     # Integration tests
