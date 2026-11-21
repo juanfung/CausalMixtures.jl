@@ -1,6 +1,6 @@
 # test/test_phase1_fixes.jl -- one testset per Phase 1 correctness fix
 # (docs/implementation_plan.md, section 03).
-using Test, CausalMixtures, LinearAlgebra, Random, Statistics
+using Test, CausalMixtures, LinearAlgebra, Random, Statistics, StatsModels
 isdefined(Main, :TestHelpers) || include("TestHelpers.jl")
 using .TestHelpers
 
@@ -178,6 +178,59 @@ end
     ## the BlockedWeights algebra
     b1, b2 = CausalMixtures.BlockedWeights(0.5, 0.25), CausalMixtures.BlockedWeights(0.125, 0.5)
     @test (1 - b1).w == 0.5 && (1 - b1).v == 0.75
+end
+
+@testset "Fix P5: PPD covariates built by column name, averaged over all n" begin
+    data = generate_hedonic_data(150, 31)
+    df = data.df
+    yf = @formula(Y_obs ~ X)
+    raw_xz = CausalMixtures.RawData(yf, @formula(D_obs ~ X + Z), df)
+    raw_zx = CausalMixtures.RawData(yf, @formula(D_obs ~ Z + X), df)
+    priors = setup_default_priors(data.true_params.ktot, J=1)
+    params = CausalMixtures.InputParams(M=25, verbose=false, model="gaussian")
+
+    seed_global!()
+    _, in_xz, out_xz = CausalMixtures.dpm!(CausalMixtures.dpm_init(raw_xz, priors, params)...)
+    _, in_zx, _ = CausalMixtures.dpm_init(raw_zx, priors, params)
+    @test in_xz.data.znames == ["(Intercept)", "X", "Z"]
+    @test in_zx.data.znames == ["(Intercept)", "Z", "X"]
+    @test in_zx.data.xnames == ["(Intercept)", "X"]
+
+    ## covariate means over all n (scale_data = false, so on the data scale)
+    xbar, wbar = mean_covariates(in_zx)
+    @test xbar ≈ [1.0, mean(df.X)]
+    @test wbar ≈ [1.0, mean(df.Z), mean(df.X)]
+
+    ## the same posterior expressed in the Z + X column order
+    kz, kx = in_xz.dims.kz, in_xz.dims.kx
+    perm = [findfirst(==(nm), in_xz.data.znames) for nm in in_zx.data.znames]
+    out_zx = CausalMixtures.GibbsOut(params.M)
+    for m in 1:params.M
+        th = out_xz.out_theta[m][1]
+        b = copy(th.beta)
+        b[1:kz] = th.beta[perm]
+        out_zx.out_theta[m] = CausalMixtures.StateTheta(1 => CausalMixtures.Theta(b, th.Sigma))
+        out_zx.out_dp[m] = out_xz.out_dp[m]
+        out_zx.out_data[m] = out_xz.out_data[m]
+    end
+
+    ## same PPD from both orders, via (xbar, wbar) and via the selection covariates alone
+    for args in ((mean_covariates(in_xz)...,), (mean_covariates(in_xz)[2],))
+        args_zx = length(args) == 2 ? mean_covariates(in_zx) : (mean_covariates(in_zx)[2],)
+        seed_global!(1); p_xz = CausalMixtures.rand_ppd(out_xz, in_xz, args...)
+        seed_global!(1); p_zx = CausalMixtures.rand_ppd(out_zx, in_zx, args_zx...)
+        @test p_xz ≈ p_zx
+    end
+    ## the old znew[1:kx] slicing would have used (1, Zbar) as the outcome covariates here
+    h = CausalMixtures.ppd_design(in_zx, wbar)
+    @test Matrix(h)[2, (kz+1):(kz+kx)] ≈ [1.0, mean(df.X)]
+
+    ## an outcome column missing from the selection equation needs xnew and wnew explicitly
+    raw_w = CausalMixtures.RawData(@formula(Y_obs ~ X), @formula(D_obs ~ Z), df)
+    _, in_w, _ = CausalMixtures.dpm_init(raw_w, setup_default_priors(6, J=1), params)
+    @test_throws ArgumentError CausalMixtures.ppd_design(in_w, [1.0, 0.5])
+    @test size(CausalMixtures.ppd_design(in_w, [1.0, 0.2], [1.0, 0.5])) == (3, 6)
+    @test_throws DimensionMismatch CausalMixtures.ppd_design(in_w, [1.0], [1.0, 0.5])
 end
 
 end # Phase 1 fixes

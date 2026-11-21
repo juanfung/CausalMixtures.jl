@@ -44,9 +44,9 @@ using Test, Statistics, Random
         @test length(output_test.out_theta) == 50
         
         # Test PPD computation
-        znew_test = mean(input_test.data.Hmat[1:100, 1:3], dims=1)'
+        znew_test = CausalMixtures.mean_covariates(input_test)  # (xbar, wbar) over all n
         ynew_test = nothing
-        @test_nowarn ynew_test = CausalMixtures.rand_ppd(output_test, input_test, znew_test[:,1])
+        @test_nowarn ynew_test = CausalMixtures.rand_ppd(output_test, input_test, znew_test...)
         
         tes_test = nothing
         @test_nowarn tes_test = CausalMixtures.dpm_ate(ynew_test, input_test)
@@ -82,9 +82,9 @@ using Test, Statistics, Random
         @test length(output_test2.out_theta) == 50
         
         # Test PPD computation
-        znew_test2 = mean(input_test2.data.Hmat[1:100, 1:3], dims=1)'
+        znew_test2 = CausalMixtures.mean_covariates(input_test2)  # (xbar, wbar) over all n
         ynew_test2 = nothing
-        @test_nowarn ynew_test2 = CausalMixtures.rand_ppd(output_test2, input_test2, znew_test2[:,1])
+        @test_nowarn ynew_test2 = CausalMixtures.rand_ppd(output_test2, input_test2, znew_test2...)
         
         tes_test2 = nothing
         @test_nowarn tes_test2 = CausalMixtures.dpm_ate(ynew_test2, input_test2)
@@ -120,9 +120,9 @@ using Test, Statistics, Random
         @test length(output_test3.out_theta) == 50
         
         # Test PPD computation
-        znew_test3 = mean(input_test3.data.Hmat[1:100, 1:3], dims=1)'
+        znew_test3 = CausalMixtures.mean_covariates(input_test3)  # (xbar, wbar) over all n
         ynew_test3 = nothing
-        @test_nowarn ynew_test3 = CausalMixtures.rand_ppd(output_test3, input_test3, znew_test3[:,1])
+        @test_nowarn ynew_test3 = CausalMixtures.rand_ppd(output_test3, input_test3, znew_test3...)
         
         tes_test3 = nothing
         @test_nowarn tes_test3 = CausalMixtures.dpm_ate(ynew_test3, input_test3)
@@ -158,9 +158,9 @@ using Test, Statistics, Random
         @test length(output_test4.out_theta) == 50
         
         # Test PPD computation
-        znew_test4 = mean(input_test4.data.Hmat[1:100, 1:3], dims=1)'
+        znew_test4 = CausalMixtures.mean_covariates(input_test4)  # (xbar, wbar) over all n
         ynew_test4 = nothing
-        @test_nowarn ynew_test4 = CausalMixtures.rand_ppd(output_test4, input_test4, znew_test4[:,1])
+        @test_nowarn ynew_test4 = CausalMixtures.rand_ppd(output_test4, input_test4, znew_test4...)
         
         tes_test4 = nothing
         @test_nowarn tes_test4 = CausalMixtures.dpm_ate(ynew_test4, input_test4)
@@ -196,8 +196,8 @@ using Test, Statistics, Random
             out = CausalMixtures.dpm!(init...)
             
             # Compute treatment effects
-            znew_comp = mean(out[2].data.Hmat[1:100, 1:3], dims=1)'
-            ynew = CausalMixtures.rand_ppd(out[3], out[2], znew_comp[:,1])
+            znew_comp = CausalMixtures.mean_covariates(out[2])  # (xbar, wbar) over all n
+            ynew = CausalMixtures.rand_ppd(out[3], out[2], znew_comp...)
             tes = CausalMixtures.dpm_ate(ynew, out[2])
             
             results[sampler] = mean(tes.ate)

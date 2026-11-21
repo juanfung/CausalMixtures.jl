@@ -104,9 +104,9 @@ end
     state, input, output = out_test
     
     # Test PPD generation doesn't crash AND get the result
-    znew_test = mean(input.data.Hmat[1:100, 1:3], dims=1)'
-    @test_nowarn CausalMixtures.rand_ppd(output, input, znew_test[:,1])  # ← Test it doesn't crash
-    ynew_test = CausalMixtures.rand_ppd(output, input, znew_test[:,1])   # ← Get actual result
+    znew_test = CausalMixtures.mean_covariates(input)  # (xbar, wbar) over all n
+    @test_nowarn CausalMixtures.rand_ppd(output, input, znew_test...)  # ← Test it doesn't crash
+    ynew_test = CausalMixtures.rand_ppd(output, input, znew_test...)   # ← Get actual result
     
     # Test ATE calculation doesn't crash AND get the result  
     @test_nowarn CausalMixtures.dpm_ate(ynew_test, input)  # ← Test it doesn't crash

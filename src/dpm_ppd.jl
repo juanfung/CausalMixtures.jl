@@ -1,5 +1,5 @@
 ## treatment effect posterior predictives
-export dpm_ppd, rand_ppd, rand_dpm, rand_blocked, rand_gaussian, dpm_ate 
+export dpm_ppd, rand_ppd, rand_dpm, rand_blocked, rand_gaussian, dpm_ate, ppd_design, mean_covariates
 
 ## --------------------------------------------------------------------------- #
 ## TODO: dpm_ppd computes posterior predictive density values
@@ -163,8 +163,61 @@ function rand_gaussian(out::GibbsOut, hnew::SparseMatrixCSC{Float64,Int64})
     return reshape(ynew_out, 3, length(out.out_dp))
 end
 
-function rand_ppd(out::GibbsOut, input::GibbsInput, znew::Vector{Float64})
-    hnew = blockdiag(sparse(znew'), sparse(znew[1:input.dims.kx]'), sparse(znew[1:input.dims.kx]'))
+## --------------------------------------------------------------------------- #
+## covariates for the posterior predictive
+
+"""
+    mean_covariates(input) -> (xbar, wbar)
+
+Means over all n units of the outcome-equation covariates `x` and the selection-equation
+covariates `w`, in the column order of `input.data.xnames` and `input.data.znames`
+(on the sampler's scale, so standardized if `scale_data` was set).
+"""
+function mean_covariates(input::GibbsInput)
+    n, kx, kz = input.dims.n, input.dims.kx, input.dims.kz
+    H = input.data.Hmat
+    wbar = vec(mean(Matrix(H[1:n, 1:kz]), dims=1))
+    xbar = vec(mean(Matrix(H[(n+1):(2n), (kz+1):(kz+kx)]), dims=1))
+    return xbar, wbar
+end
+
+"""
+    ppd_design(input, xnew, wnew)
+
+The 3 x ktot design `blockdiag(wnew', xnew', xnew')` for a new unit.
+"""
+function ppd_design(input::GibbsInput, xnew::AbstractVector{<:Real}, wnew::AbstractVector{<:Real})
+    length(xnew) == input.dims.kx || throw(DimensionMismatch("xnew has length $(length(xnew)), expected $(input.dims.kx)"))
+    length(wnew) == input.dims.kz || throw(DimensionMismatch("wnew has length $(length(wnew)), expected $(input.dims.kz)"))
+    return blockdiag(sparse(Float64.(wnew)'), sparse(Float64.(xnew)'), sparse(Float64.(xnew)'))
+end
+
+"""
+    ppd_design(input, znew)
+
+Design for a new unit given only its selection-equation covariates `znew` (in the order of
+`input.data.znames`). The outcome covariates are taken from `znew` by column name, so the
+order of terms in either formula does not matter. Every outcome-equation column must also
+appear in the selection equation; otherwise pass `xnew` and `wnew` separately.
+"""
+function ppd_design(input::GibbsInput, znew::AbstractVector{<:Real})
+    xnames, znames = input.data.xnames, input.data.znames
+    idx = map(xnames) do nm
+        k = findfirst(==(nm), znames)
+        k === nothing && throw(ArgumentError("outcome column $(nm) is not in the selection equation; " *
+                                             "call rand_ppd(out, input, xnew, wnew)"))
+        k
+    end
+    return ppd_design(input, znew[idx], znew)
+end
+
+rand_ppd(out::GibbsOut, input::GibbsInput, znew::AbstractVector{<:Real}) =
+    rand_ppd(out, input, ppd_design(input, znew))
+
+rand_ppd(out::GibbsOut, input::GibbsInput, xnew::AbstractVector{<:Real}, wnew::AbstractVector{<:Real}) =
+    rand_ppd(out, input, ppd_design(input, xnew, wnew))
+
+function rand_ppd(out::GibbsOut, input::GibbsInput, hnew::SparseMatrixCSC{Float64,Int64})
     if input.params.model == "dpm"
         ppd = rand_dpm(out, input.priors.prior_theta, hnew)
     elseif input.params.model == "marginal"

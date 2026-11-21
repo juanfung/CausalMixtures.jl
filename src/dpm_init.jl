@@ -47,10 +47,12 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     y = convert(Array, data.df[!, data.y_form.lhs.sym])
     d = convert(Array, data.df[!, data.d_form.lhs.sym])
     
-    xmat = ModelMatrix( ModelFrame(data.y_form, data.df) ).m
+    xframe = ModelFrame(data.y_form, data.df)
+    xmat = ModelMatrix(xframe).m
     if verbose println("Xmat dim:\nN = ", size(xmat, 1), ", K = ", size(xmat, 2)) end
     
-    zmat = ModelMatrix( ModelFrame(data.d_form, data.df) ).m
+    zframe = ModelFrame(data.d_form, data.df)
+    zmat = ModelMatrix(zframe).m
     if verbose println("Zmat dim:\nN = ", size(zmat, 1), ", K = ", size(zmat, 2)) end
     
     ## get dimensions
@@ -87,7 +89,8 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     upper = [ di == 1 ? Inf : 0 for di in d ]
     
     ## collect data objects
-    input_data = InputData(y=ys, d=d, lower=lower, upper=upper, Hmat=Hmat)
+    input_data = InputData(y=ys, d=d, lower=lower, upper=upper, Hmat=Hmat,
+                           xnames=string.(coefnames(xframe)), znames=string.(coefnames(zframe)))
 
     model = params.model
     

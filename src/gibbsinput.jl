@@ -34,9 +34,12 @@ struct InputData
     lower::Vector{Float64}
     upper::Vector{Float64}
     Hmat::SparseMatrixCSC{Float64,Int64}
+    xnames::Vector{String} # outcome-equation columns of Hmat, in order
+    znames::Vector{String} # selection-equation columns of Hmat, in order
 end
 
-InputData(; y=[0.0], d=[0], lower=[0.0], upper=[0.0], Hmat=sparse([0.0])) = InputData(y, d, lower, upper, Hmat)
+InputData(; y=[0.0], d=[0], lower=[0.0], upper=[0.0], Hmat=sparse([0.0]), xnames=String[], znames=String[]) =
+    InputData(y, d, lower, upper, Hmat, xnames, znames)
 ## TODO: define InputData with/without {xmat,zmat}
 
 ## --------------------------------------------------------------------------- #

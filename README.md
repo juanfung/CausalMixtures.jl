@@ -54,11 +54,11 @@ state, input, output = dpm!(init...)
 
 ### 4. Calculate Treatment Effects
 ```julia
-# Set prediction point (usually sample mean)
-znew = mean(input.data.Hmat[1:100, 1:3], dims=1)'
+# Set prediction point: covariate means over all n units, matched to each equation by name
+xbar, wbar = mean_covariates(input)
 
 # Generate posterior predictive draws
-ynew = rand_ppd(output, input, znew[:,1])
+ynew = rand_ppd(output, input, xbar, wbar)
 
 # Calculate treatment effects
 tes = dpm_ate(ynew, input)
