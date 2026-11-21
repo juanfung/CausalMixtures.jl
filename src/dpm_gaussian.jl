@@ -20,7 +20,12 @@ function dpm_gaussian!(state::GibbsState, input::GibbsInput, out::GibbsOut; test
             @printf("\nIteration: %d\nUpdating parameters and latent data...", m + state.state_sampler.batch_m )
         end
         
-        state = update_gaussian_params!(state, input)
+        ## test using observed data as latent data?
+        if test
+            state = update_theta!(state, input, 1, collect(1:input.dims.n), input.data.Hmat)
+        else
+            state = update_gaussian_params!(state, input)
+        end
         
         ## 2. save iteration m draws
         if verbose && mod(m, max(1, M/10)) == 0 @printf("\nDone!") end

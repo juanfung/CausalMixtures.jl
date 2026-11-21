@@ -241,4 +241,21 @@ end
     @test !(:RawRata in names(CausalMixtures))
 end
 
+@testset "Odds and ends: test = true paths update theta and keep latent data fixed" begin
+    data = generate_hedonic_data(60, 4321)
+    raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
+    for model in ("dpm", "blocked", "marginal", "fmn", "gaussian")
+        seed_global!()
+        priors = setup_default_priors(data.true_params.ktot, J = model == "gaussian" ? 1 : 3)
+        state, input, out = CausalMixtures.dpm_init(raw, priors,
+                                CausalMixtures.InputParams(M=3, verbose=false, model=model))
+        latent = copy(state.state_data)
+        state, input, out = CausalMixtures.dpm!(state, input, out; test=true)
+        @test state.state_data.dstar == latent.dstar
+        @test state.state_data.y1 == latent.y1
+        @test state.state_data.y0 == latent.y0
+        @test out.out_theta[1][1].beta != out.out_theta[3][1].beta
+    end
+end
+
 end # Phase 1 fixes

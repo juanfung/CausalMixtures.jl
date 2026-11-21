@@ -25,7 +25,12 @@ function dpm_fmn!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=fals
         ## 2. update theta and latent data
         if verbose && mod(m, max(1, M/10)) == 0 @printf("\nUpdating component parameters and latent data...") end
         
-        state = update_params!(state, input)
+        ## test using observed data as latent data?
+        if test
+            state = update_theta_only!(state, input)
+        else
+            state = update_params!(state, input)
+        end
         
         ## 3. save iteration m draws
         if verbose && mod(m, max(1, M/10)) == 0 @printf("\nDone!") end

@@ -179,7 +179,7 @@ function update_theta!(state::GibbsState, input::GibbsInput, j::Int64, idx::Vect
     y0j = view(state.state_data.y0, idx) # nj x 1
     
     yij = vcat(dstarj, y1j, y0j) # 3nj x 1
-    ##Hj = input.data.Hmat[vcat(idx, idx+input.dims.n, idx+2*input.dims.n),:] # 3nj x ktot
+    ##Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] # 3nj x ktot
 
     ## 1. update Sigma
     function sample_Sigma( prior_theta::PriorTheta, theta::Theta )
@@ -225,7 +225,7 @@ function update_latent!(state::GibbsState, input::GibbsInput, j::Int64, idx::Vec
     yj = view(input.data.y.a, idx) # nj x 1
     dj = view(input.data.d, idx) # nj x 1
     
-    ##Hb = input.data.Hmat[vcat(idx, idx+input.dims.n, idx+2*input.dims.n),:] * state.state_theta[j].beta # 3nj x 1
+    ##Hb = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] * state.state_theta[j].beta # 3nj x 1
     Hb = Hj * state.state_theta[j].beta
     zbD = view(Hb, 1:nj) # nj x 1
     xb1 = view(Hb, (nj+1):(2nj)) # nj x 1
@@ -519,7 +519,7 @@ function update_latent_only!(state::GibbsState, input::GibbsInput)
     @inbounds for j in 1:state.state_dp.J # k in keys(state.state_theta) or keys(state.state_dp.njs)        
         if state.state_dp.njs[j] == 0 continue end        
         idx = sort( collect( keys( ( filter( v -> v.second == j, state.state_dp.labels ) ) ) ) )
-        ##Hj = input.data.Hmat[vcat(idx, idx+input.dims.n, idx+2*input.dims.n),:] # 3nj x ktot
+        ##Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] # 3nj x ktot
         ## update latent data
         state = update_ymiss_only!(state, input, j, idx)
     end    
@@ -531,7 +531,7 @@ function update_theta_only!(state::GibbsState, input::GibbsInput)
     @inbounds for j in 1:state.state_dp.J # k in keys(state.state_theta) or keys(state.state_dp.njs)        
         if state.state_dp.njs[j] == 0 continue end        
         idx = sort( collect( keys( ( filter( v -> v.second == j, state.state_dp.labels ) ) ) ) )
-        Hj = input.data.Hmat[vcat(idx, idx+input.dims.n, idx+2*input.dims.n),:] # 3nj x ktot        
+        Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] # 3nj x ktot        
         ## update theta
         state = update_theta!(state, input, j, idx, Hj)        
     end    
@@ -550,7 +550,7 @@ function update_ymiss_only!(state::GibbsState, input::GibbsInput, j::Int64, idx:
     yj = view(input.data.y.a, idx) # nj x 1
     dj = view(input.data.d, idx) # nj x 1
     
-    Hb = input.data.Hmat[vcat(idx, idx+input.dims.n, idx+2*input.dims.n),:] * state.state_theta[j].beta # 3nj x 1
+    Hb = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] * state.state_theta[j].beta # 3nj x 1
     zbD = view(Hb, 1:nj) # nj x 1
     xb1 = view(Hb, (nj+1):(2nj)) # nj x 1
     xb0 = view(Hb, (2nj+1):(3nj)) # nj x 1
@@ -605,14 +605,14 @@ end
 ## update {Theta} only
 function update_blocked_theta_only!(state::GibbsState, input::GibbsInput)
     ##for k in keys(state.state_dp.ws) or keys(state.state_dp.njs)
-    @inbounds for j in 1:length(input.priors.prior_dp.J) 
+    @inbounds for j in 1:input.priors.prior_dp.J
         if state.state_dp.njs[j] == 0
             ## sample from prior
             state.state_theta = sample_prior_theta!(state.state_theta, input.priors.prior_theta, j)
         else
             ## sample from posterior
             idx = sort( collect( keys( ( filter( v -> v.second == j, state.state_dp.labels ) ) ) ) )
-            Hj = input.data.Hmat[vcat(idx, idx+input.dims.n, idx+2*input.dims.n),:] # 3nj x ktot        
+            Hj = input.data.Hmat[vcat(idx, idx .+ input.dims.n, idx .+ 2*input.dims.n),:] # 3nj x ktot        
             ## update theta
             state = update_theta!(state, input, j, idx, Hj)
         end
