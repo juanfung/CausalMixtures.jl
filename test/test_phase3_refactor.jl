@@ -31,12 +31,13 @@ end
     for model in ("dpm", "blocked", "fmn", "marginal")
         seed_global!()
         params = CausalMixtures.InputParams(M=1, scale_data=(true, true), verbose=false, model=model)
-        state, input, out = CausalMixtures.dpm_init(raw, setup_default_priors(2, 3, J=8), params)
+        state, input, out = CausalMixtures.dpm_init(raw, setup_default_priors(2, 3, J=8, slopes = model == "marginal" ? :common : :cluster), params)
         @test state.state_dp.labels isa Vector{Int}
-        check_state(state, input; occupied_only = model == "dpm", fixed_J = model == "fmn")
+        occ = model in ("dpm", "marginal")
+        check_state(state, input; occupied_only = occ, fixed_J = model == "fmn")
         for _ in 1:15
             state, input, out = CausalMixtures.dpm!(state, input, out)
-            check_state(state, input; occupied_only = model == "dpm", fixed_J = model == "fmn")
+            check_state(state, input; occupied_only = occ, fixed_J = model == "fmn")
         end
     end
 end
@@ -132,7 +133,7 @@ end
         Random.seed!(global_seed)
         rng = Xoshiro(seed)
         params = CausalMixtures.InputParams(M=6, scale_data=(true, true), verbose=false, model=model)
-        priors = setup_default_priors(2, 3, J = model == "gaussian" ? 1 : 5)
+        priors = setup_default_priors(2, 3, J = model == "gaussian" ? 1 : 5, slopes = model == "marginal" ? :common : :cluster)
         state, input, out = CausalMixtures.dpm!(CausalMixtures.dpm_init(raw, priors, params; rng=rng)...; rng=rng)
         ## continue the chain, then the PPD
         state, input, out = CausalMixtures.dpm!(state, input, out; rng=rng)

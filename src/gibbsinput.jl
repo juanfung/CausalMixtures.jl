@@ -49,7 +49,9 @@ InputData(; y=ScaleData(a=[0.0]), d=[0], lower=[0.0], upper=[0.0], Hmat=sparse([
 ## Parameters
 
 ## M iterations; save the component parameters every `thin`-th iteration and the latent data
-## and labels every `latent_thin`-th iteration (0 = never)
+## and labels every `latent_thin`-th iteration (0 = never). `slopes` is the slope mode of the
+## Design A sampler (model = "marginal"): :common (shared covariate slopes, the DPM over the
+## intercepts and Sigma) or :cluster (the full beta per cluster); other models ignore it.
 mutable struct InputParams
     M::Int64
     scale_data::Tuple{Bool,Bool}
@@ -57,15 +59,17 @@ mutable struct InputParams
     model::String
     thin::Int64
     latent_thin::Int64
-    function InputParams(M, scale_data, verbose, model, thin, latent_thin)
+    slopes::Symbol
+    function InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes)
         thin >= 1 || throw(ArgumentError("thin must be >= 1, got $thin"))
         latent_thin >= 0 || throw(ArgumentError("latent_thin must be >= 0, got $latent_thin"))
-        return new(M, scale_data, verbose, model, thin, latent_thin)
+        slopes in (:common, :cluster) || throw(ArgumentError("slopes must be :common or :cluster, got $slopes"))
+        return new(M, scale_data, verbose, model, thin, latent_thin, slopes)
     end
 end
 
-InputParams(; M=100, scale_data=(false,false), verbose=true, model="dpm", thin=1, latent_thin=0) =
-    InputParams(M, scale_data, verbose, model, thin, latent_thin)
+InputParams(; M=100, scale_data=(false,false), verbose=true, model="dpm", thin=1, latent_thin=0, slopes=:common) =
+    InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes)
 ## set default model to dpm
 InputParams(m, s, v) = InputParams(M=m, scale_data=s, verbose=v, model="dpm")
 
@@ -111,13 +115,16 @@ end
 
 PriorTheta(; prior_beta=PriorBeta(), prior_Sigma=PriorSigma()) = PriorTheta(prior_beta, prior_Sigma)
 
-## collect priors
+## collect priors. `slopes` records the slope mode the prior was built for by
+## setup_default_priors (:cluster, :common), or :unspecified.
 struct InputPriors
     prior_dp::PriorDP
     prior_theta::PriorTheta
+    slopes::Symbol
 end
 
-InputPriors(; prior_dp = PriorDP(), prior_theta=PriorTheta()) = InputPriors(prior_dp, prior_theta)
+InputPriors(prior_dp::PriorDP, prior_theta::PriorTheta) = InputPriors(prior_dp, prior_theta, :unspecified)
+InputPriors(; prior_dp = PriorDP(), prior_theta=PriorTheta(), slopes=:unspecified) = InputPriors(prior_dp, prior_theta, slopes)
 
 ## --------------------------------------------------------------------------- #
 ## collect all inputs

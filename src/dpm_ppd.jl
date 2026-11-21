@@ -185,8 +185,7 @@ function rand_ppd(rng::AbstractRNG, out::GibbsOut, input::GibbsInput, hnew::Spar
     if input.params.model == "dpm"
         ppd = rand_dpm(rng, out, input.priors.prior_theta, hnew)
     elseif input.params.model == "marginal"
-        ppd = rand_dpm(rng, out, input.priors.prior_theta, hnew, 
-                       component_filter = j -> out.out_dp[end].njs[j] > 0)
+        ppd = rand_marginal(rng, out, input, hnew)
     elseif input.params.model == "blocked"
         ppd = rand_blocked(rng, out, hnew)
     elseif input.params.model == "fmn"

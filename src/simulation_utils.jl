@@ -130,8 +130,9 @@ end
 
 """
     setup_default_priors(kx, kz; J=20, alpha=1.0, alpha_shape=2.0, alpha_rate=2.0,
-                         sd_intercept=1.0, sd_intercept_d=0.5, sd_probit=0.5, sd_outcome=0.5,
-                         rho=10, r=0.153, xintercept=1, zintercept=1)
+                         sd_intercept=1.0, sd_intercept_d=0.5, sd_probit=0.5, slopes=:cluster,
+                         sd_outcome = slopes == :common ? 1.0 : 0.5, rho=10, r=0.153,
+                         xintercept=1, zintercept=1)
     setup_default_priors(raw::RawData; kwargs...)
 
 Default priors (candidate C3 of `docs/priors.md`) for a model with `kx` outcome-equation columns
@@ -146,15 +147,18 @@ On raw data with sd(y) far from 1 they shrink the coefficients too much.
 | selection intercept (`d*`) | N(0, `sd_intercept_d`² = 0.5²) | keeps cluster propensities inside (0.05, 0.95); a cluster that is all treated or all controls identifies its missing arm only through the prior |
 | outcome intercepts (`y1`, `y0`) | N(0, `sd_intercept`² = 1) | cluster means of standardized y spread over about ±2 |
 | probit slopes | N(0, `sd_probit`² = 0.5²) | with standardized w, about 6% of prior propensity mass outside (0.05, 0.95) (C0: 92%) |
-| outcome slopes | N(0, `sd_outcome`² = 0.5²) | implied sd(y) about 1.1, against 1 in the data |
+| outcome slopes | N(0, `sd_outcome`²): 0.5² per cluster (`slopes = :cluster`), 1 when shared (`slopes = :common`) | implied sd(y) about 1.1, against 1 in the data; a shared slope is identified by all n units |
 | `Sigma` | `NobileWishart(rho, rho*R)`, `rho = 10`, `R = diag(1/rho, r, r)`, `r = 0.153` | prior median within-cluster Var(y1) and Var(y0) of 0.3 |
 | `alpha` | Gamma(`alpha_shape` = 2, rate `alpha_rate` = 2), started at `alpha` = 1 | E[k] about 6.6 at n = 500, wide but not degenerate at 1 |
 
 All prior means are zero and the coefficients are independent. `xintercept` and `zintercept`
 give the position of the intercept column in each equation (`nothing` if there is none); the
 `RawData` method reads them from the formulas. Set `alpha_shape = 0` to fix alpha at `alpha`.
-`J` is the truncation level for `blocked`, `fmn` and `marginal`, and the initial number of
-components for `dpm`.
+`J` is the truncation level for `blocked` and `fmn`, and the initial number of components for
+`dpm` and `marginal`. `slopes` is the slope mode of the Design A sampler (`model = "marginal"`,
+`InputParams(slopes = ...)`, default `:common` there); it sets the outcome-slope default and is
+recorded in the priors so that `dpm_init` can warn about a mismatch. Use `slopes = :common` with
+`model = "marginal"` and its default slope mode.
 
 The calibration, its targets and the comparison with the other candidates are in
 `docs/priors.md`.
@@ -167,12 +171,14 @@ function setup_default_priors(kx::Integer, kz::Integer;
                               sd_intercept::Real = 1.0,
                               sd_intercept_d::Real = 0.5,
                               sd_probit::Real = 0.5,
-                              sd_outcome::Real = 0.5,
+                              slopes::Symbol = :cluster,
+                              sd_outcome::Real = slopes == :common ? 1.0 : 0.5,
                               rho::Integer = 10,
                               r::Real = 0.153,
                               xintercept::Union{Integer,Nothing} = 1,
                               zintercept::Union{Integer,Nothing} = 1)
     kx >= 1 && kz >= 1 || throw(ArgumentError("kx and kz must be positive, got kx = $kx, kz = $kz"))
+    slopes in (:cluster, :common) || throw(ArgumentError("slopes must be :cluster or :common, got $slopes"))
     for (pos, k, nm) in ((xintercept, kx, "xintercept"), (zintercept, kz, "zintercept"))
         pos === nothing || 1 <= pos <= k || throw(ArgumentError("$nm = $pos is not a column in 1:$k"))
     end
@@ -186,7 +192,8 @@ function setup_default_priors(kx::Integer, kz::Integer;
                        alpha_rate=Float64(alpha_rate))
     prior_beta = PriorBeta(mu=zeros(kz + 2kx), V=Matrix(inv(V0)), Vinv=true)
     prior_sigma = PriorSigma(rho=Int(rho), R=Matrix(Diagonal([1/rho, r, r])))
-    return InputPriors(prior_dp=prior_dp, prior_theta=PriorTheta(prior_beta=prior_beta, prior_Sigma=prior_sigma))
+    return InputPriors(prior_dp=prior_dp, prior_theta=PriorTheta(prior_beta=prior_beta, prior_Sigma=prior_sigma),
+                       slopes=slopes)
 end
 
 ## intercept positions read from the formulas, by column name

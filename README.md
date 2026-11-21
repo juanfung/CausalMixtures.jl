@@ -45,7 +45,7 @@ params = InputParams(
     scale_data=(true,true),    # Scale data
     verbose=true,              # Show progress
     model="blocked",           # ✅ RELIABLE (or "dpm")
-    # model="marginal"         # ❌ UNSTABLE - avoid!
+    # model="marginal"         # Design A (Phase 4a, in validation); slopes=:common or :cluster
     thin=1,                    # save (theta_j, n_j, alpha) every thin-th iteration
     latent_thin=0              # save latent data and labels every k-th iteration (0 = never)
 )
@@ -89,7 +89,7 @@ println("95% CI: $(round.(quantile(tes.ate, [0.025, 0.975]), digits=3))")
 |---------|--------|-------------|
 | `"blocked"` | ✅ **Reliable** | Default choice, stable |
 | `"dpm"` | ✅ **Reliable** | More flexible, research use |
-| `"marginal"` | ⚠️ **Deprecated** | Do not use; to be replaced by the Design A sampler (`docs/implementation_plan.md`) |
+| `"marginal"` | 🧪 **In validation** | Design A (`docs/implementation_plan.md` §06): β integrated out of the label step; `slopes=:common` (default) or `:cluster`. Use `setup_default_priors(raw_data; slopes=:common)` |
 
 ## Testing
 
@@ -112,14 +112,14 @@ include("test/runtests.jl")
 │   ├── dpm_gaussian.jl
 │   ├── dpm_gibbs.jl
 │   ├── dpm_init.jl            # Initialization functions
-│   ├── dpm_marginal.jl
+│   ├── dpm_marginal.jl        # Design A sampler (model = "marginal")
 │   ├── dpm_ppd.jl             # rand_ppd(), dpm_ate()
 │   ├── gibbsinput.jl
 │   ├── gibbsout.jl
 │   ├── gibbsppd.jl
 │   ├── gibbsstate.jl
 │   ├── misc_functions.jl
-│   ├── sampler_functions.jl.   # MCMC sampler helper functions (blocked, dpm work; marginal broken)
+│   ├── sampler_functions.jl    # MCMC sampler helper functions
 │   └── simulation_utils.jl     # generate_hedonic_data(), setup_default_priors()
 └── test
     ├── integration

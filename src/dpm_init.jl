@@ -99,10 +99,9 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
                            xnames=string.(coefnames(xframe)), znames=string.(coefnames(zframe)))
 
     model = params.model
-    if model == "marginal"
-        @warn "model = \"marginal\" is deprecated: its new-component step is biased and its PPD and " *
-              "alpha update do not match the model it runs. It will be replaced by the Design A sampler " *
-              "(docs/implementation_plan.md). Use \"blocked\" or \"dpm\" meanwhile."
+    if model == "marginal" && priors.slopes != :unspecified && priors.slopes != params.slopes
+        @warn "the priors were built for slopes = :$(priors.slopes) but the sampler runs slopes = " *
+              ":$(params.slopes); use setup_default_priors(...; slopes = :$(params.slopes))"
     end
     
     ## collect all inputs
@@ -112,7 +111,7 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
         pb = priors.prior_theta.prior_beta
         priors = InputPriors(priors.prior_dp,
                              PriorTheta(PriorBeta(pb.mu, inv(pb.Vcov), true, pb.Vcov, pb.Lcov),
-                                        priors.prior_theta.prior_Sigma))
+                                        priors.prior_theta.prior_Sigma), priors.slopes)
     end
 
     # ADDED: Auto-fix J=1 for gaussian sampler
@@ -122,7 +121,7 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
         new_prior_dp = PriorDP(alpha=priors.prior_dp.alpha, J=1, 
                                alpha_shape=priors.prior_dp.alpha_shape, 
                                alpha_rate=priors.prior_dp.alpha_rate)
-        priors = InputPriors(prior_dp=new_prior_dp, prior_theta=priors.prior_theta)
+        priors = InputPriors(prior_dp=new_prior_dp, prior_theta=priors.prior_theta, slopes=priors.slopes)
     end
     
     input = GibbsInput(data=input_data, dims=dims, params=params, priors=priors)
@@ -143,8 +142,8 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     ## assign component membership uniformly
     J = priors.prior_dp.J
     labels = J != 1 ? [rand(rng, 1:J) for i in 1:n] : ones(Int64, n)
-    if model == "dpm"
-        ## the Polya-urn sampler keeps only occupied components (J = number of clusters),
+    if model in ("dpm", "marginal")
+        ## the Polya-urn and Design A samplers keep only occupied components (J = number of clusters),
         ## so relabel the occupied ones as 1:k
         occupied = sort(unique(labels))
         relabel = zeros(Int64, J)
@@ -178,6 +177,14 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
         ##                        priors.prior_theta.prior_Sigma.rho * priors.prior_theta.prior_Sigma.R )
         ##state_theta[j] = Theta(beta=beta_j, Sigma=Sigma_j)
         sample_prior_theta!(rng, state_theta, priors.prior_theta, j)
+    end
+    if model == "marginal"
+        ## Design A: one shared b (the slopes of component 1's prior draw) under :common
+        D = DesignA(input)
+        b = state_theta[1].beta[D.gidx]
+        for j in 1:state_dp.J
+            state_theta[j] = Theta(beta=full_beta(D, state_theta[j].beta[D.cidx], b), Sigma=state_theta[j].Sigma)
+        end
     end
     
     ## 2d. collect sampler state parameters

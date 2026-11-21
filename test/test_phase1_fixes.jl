@@ -53,7 +53,8 @@ end
     end
 
     a, b, n, M = 2.0, 2.0, 50, 100_000
-    for k in (1, 4, 12), update! in (CausalMixtures.update_alpha!, CausalMixtures.update_marginal_alpha!)
+    ## (the old marginal sampler's copy of this step was deleted with it in Phase 4a)
+    for k in (1, 4, 12), update! in (CausalMixtures.update_alpha!,)
         input = CausalMixtures.GibbsInput(dims=CausalMixtures.InputDims(n=n),
                     priors=CausalMixtures.InputPriors(prior_dp=CausalMixtures.PriorDP(J=k, alpha=1.0,
                                                       alpha_shape=a, alpha_rate=b)))
@@ -88,7 +89,7 @@ end
     raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
     for model in ("dpm", "fmn", "blocked", "marginal")
         seed_global!()
-        priors = setup_default_priors(2, 3, J=3)
+        priors = setup_default_priors(2, 3, J=3, slopes = model == "marginal" ? :common : :cluster)
         params = CausalMixtures.InputParams(M=1, verbose=false, model=model)
         state, input, out = CausalMixtures.dpm_init(raw, priors, params)
         state.state_data.y1[1] = 1e4
@@ -96,7 +97,7 @@ end
         update! = Dict("dpm" => CausalMixtures.update_labels!,
                        "fmn" => CausalMixtures.update_fmn_labels!,
                        "blocked" => CausalMixtures.update_blocked_labels!,
-                       "marginal" => CausalMixtures.update_marginal_labels!)[model]
+                       "marginal" => (r, s, i) -> CausalMixtures.update_marginal_labels!(r, s, i, DesignA(i)))[model]
         state = update!(Random.default_rng(), state, input)
         labs = [state.state_dp.labels[i] for i in 1:input.dims.n]
         @test all(l -> l >= 1, labs)
@@ -117,8 +118,8 @@ end
         @test sort(collect(keys(dp.njs))) == collect(1:dp.J)
         @test sum(values(dp.njs)) == 12
         @test length(state.state_theta) == dp.J
-        if model == "dpm"
-            ## Polya urn: only occupied components, labelled 1:k
+        if model in ("dpm", "marginal")
+            ## Polya urn and Design A: only occupied components, labelled 1:k
             @test all(>(0), values(dp.njs))
             @test dp.J == length(unique(values(dp.labels)))
         else
@@ -247,7 +248,7 @@ end
     raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
     for model in ("dpm", "blocked", "marginal", "fmn", "gaussian")
         seed_global!()
-        priors = setup_default_priors(2, 3, J = model == "gaussian" ? 1 : 3)
+        priors = setup_default_priors(2, 3, J = model == "gaussian" ? 1 : 3, slopes = model == "marginal" ? :common : :cluster)
         state, input, out = CausalMixtures.dpm_init(raw, priors,
                                 CausalMixtures.InputParams(M=3, verbose=false, model=model))
         latent = copy(state.state_data)
@@ -307,13 +308,17 @@ end
     @test c ≈ d
 end
 
-@testset "Odds and ends: parallel_ppd retired, marginal deprecated" begin
+@testset "Odds and ends: parallel_ppd retired; marginal replaced by Design A (Phase 4a)" begin
     @test !isdefined(CausalMixtures, :parallel_ppd)
     @test !isdefined(CausalMixtures, :single_dpm_ppd)
+    @test !isdefined(CausalMixtures, :update_marginal_params!)
     data = generate_hedonic_data(40, 8)
     raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
     priors = setup_default_priors(2, 3, J=3)
-    @test_logs (:warn, r"deprecated") CausalMixtures.dpm_init(raw, priors,
+    ## priors built for :cluster with the default slopes = :common: warn about the mismatch
+    @test_logs (:warn, r"slopes") CausalMixtures.dpm_init(raw, priors,
+        CausalMixtures.InputParams(M=1, verbose=false, model="marginal"))
+    @test_logs CausalMixtures.dpm_init(raw, setup_default_priors(2, 3, J=3, slopes=:common),
         CausalMixtures.InputParams(M=1, verbose=false, model="marginal"))
     @test_logs CausalMixtures.dpm_init(raw, priors, CausalMixtures.InputParams(M=1, verbose=false, model="blocked"))
 end
