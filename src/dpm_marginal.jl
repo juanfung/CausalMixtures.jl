@@ -209,12 +209,6 @@ end
 ## which is the integral of N3(z~ | mu, S) over the unobserved outcome and the half-line of
 ## z~_d that agrees with d: d = 1{d* > 0} with d* = z~_d + g_d, so the cut-off on z~_d is -g_d.
 
-## the beta^c-collapsed predictive (mu, S) of z~_i for a cluster with posterior (C, m) and Sigma
-function predictive(C::Cholesky, m::Vector{Float64}, Sigma::AbstractMatrix{Float64},
-                    Hc::Matrix{Float64}, D::DesignA, i::Integer)
-    return unit_mean(D.Xc, D.Wc, m, i), Sigma + Hc * (C \ Matrix(Hc'))
-end
-
 ## log p(d, y~ | mu, S): the R2 observed-data score. `gd` is the global part of the selection
 ## index, (H^g_i b)_d: d = 1{d* > 0} with d* = z~_d + gd, so the threshold on z~_d is -gd.
 function r2_score(mu::NTuple{3,Float64}, S::AbstractMatrix{Float64}, yo::Real, d::Integer, gd::Real=0.0)
@@ -245,6 +239,85 @@ function r2_draw(rng::AbstractRNG, mu::NTuple{3,Float64}, S::AbstractMatrix{Floa
     return d == 1 ? (ds, Float64(yo), ym) : (ds, ym, Float64(yo))
 end
 
+## The label step keeps, per slot, Q^-1 and m = Q^-1 r of the cluster posterior of beta^c given
+## Sigma. Q = V_c^-1 + H'(Sigma^-1 (x) I)H depends on the members' design and Sigma only, not on
+## z~, so when unit i returns to the cluster it left, Q^-1 from before its removal is restored
+## and only r and m are recomputed; Q is refactored on a removal and on a move.
+mutable struct PostCache
+    Qinv::Matrix{Float64}
+    r::Vector{Float64}
+    m::Vector{Float64}
+end
+PostCache(kc::Integer) = PostCache(zeros(kc, kc), zeros(kc), zeros(kc))
+
+## Q^-1 from the statistics (design part only)
+function post_Q!(pc::PostCache, st::ClusterStats, D::DesignA, Sinv::AbstractMatrix{Float64})
+    kz, kx = size(st.WX)
+    g, b1, b0 = coef_blocks(kx, kz)
+    Q = pc.Qinv
+    copyto!(Q, D.Vc_inv)
+    @inbounds for (ra, ia) in ((g, 1), (b1, 2), (b0, 3)), (rb, ib) in ((g, 1), (b1, 2), (b0, 3))
+        s = Sinv[ia, ib]
+        for (q, cb) in enumerate(rb), (p, ca) in enumerate(ra)
+            Q[ca, cb] += s * (ia == 1 ? (ib == 1 ? st.WW[p, q] : st.WX[p, q]) :
+                              (ib == 1 ? st.WX[q, p] : st.XX[p, q]))
+        end
+    end
+    _, info = LAPACK.potrf!('U', Q)
+    info == 0 || throw(PosDefException(info))
+    LAPACK.potri!('U', Q)
+    @inbounds for c in axes(Q, 2), a in (c + 1):size(Q, 1)
+        Q[a, c] = Q[c, a]
+    end
+    return pc
+end
+
+## r = V_c^-1 mu_c + H'(Sigma^-1 (x) I) z~ and m = Q^-1 r
+function post_m!(pc::PostCache, st::ClusterStats, D::DesignA, Sinv::AbstractMatrix{Float64})
+    kz, kx = size(st.WX)
+    r = pc.r
+    copyto!(r, D.Vc_inv_mu)
+    @inbounds for c in 1:3
+        for a in 1:kz
+            r[a] += st.Wz[a, c] * Sinv[c, 1]
+        end
+        for a in 1:kx
+            r[kz + a] += st.Xz[a, c] * Sinv[c, 2]
+            r[kz + kx + a] += st.Xz[a, c] * Sinv[c, 3]
+        end
+    end
+    mul!(pc.m, pc.Qinv, r)
+    return pc
+end
+
+post_cache!(pc, st, D, Sinv) = post_m!(post_Q!(pc, st, D, Sinv), st, D, Sinv)
+
+## the beta^c-collapsed predictive of z~_i for a cluster: mean H^c_i m and, into S,
+## Sigma + H^c_i Q^-1 H^c_i', with H^c_i = blockdiag(w_i', x_i', x_i')
+function predictive!(S::Matrix{Float64}, pc::PostCache, Sigma::AbstractMatrix{Float64}, D::DesignA, i::Integer)
+    Wc, Xc = D.Wc, D.Xc
+    kz, kx = size(Wc, 2), size(Xc, 2)
+    V = pc.Qinv
+    @inbounds for ib in 1:3, ia in 1:ib
+        oa = ia == 1 ? 0 : (ia == 2 ? kz : kz + kx)
+        ob = ib == 1 ? 0 : (ib == 2 ? kz : kz + kx)
+        na = ia == 1 ? kz : kx
+        nb = ib == 1 ? kz : kx
+        acc = 0.0
+        for q in 1:nb
+            hq = ib == 1 ? Wc[i, q] : Xc[i, q]
+            t = 0.0
+            for p in 1:na
+                t += (ia == 1 ? Wc[i, p] : Xc[i, p]) * V[oa + p, ob + q]
+            end
+            acc += t * hq
+        end
+        S[ia, ib] = Sigma[ia, ib] + acc
+        S[ib, ia] = S[ia, ib]
+    end
+    return unit_mean(Xc, Wc, pc.m, i)
+end
+
 ## (i) labels. label_step = :r2 (default): the joint label-and-latent step R2, scoring the
 ## observed data and redrawing unit i's latent data from the chosen cluster's predictive.
 ## label_step = :augmented (Phase 4a): score the current augmented z~_i, latent data unchanged.
@@ -252,15 +325,17 @@ function update_marginal_labels!(rng::AbstractRNG, state::GibbsState, input::Gib
                                  r2::Bool = input.params.label_step == :r2)
     dp = state.state_dp
     ps = input.priors.prior_theta.prior_Sigma
-    rhoR = ps.rho .* ps.R
+    G0 = NobileFactor(ps.rho .* ps.R)
     b = global_slopes(state, D)
     K = length(dp.njs)
     sd = state.state_data
     y, dobs = input.data.y.a, input.data.d
+    kc = length(D.cidx)
     ## per-slot statistics, Sigma^-1 and posterior caches
     stats = [cluster_stats(state, D, b, dp.members[j]) for j in 1:K]
     Sinv = [inv(state.state_theta[j].Sigma) for j in 1:K]
-    post = [cluster_post(stats[j], D, Sinv[j]) for j in 1:K]
+    post = [post_cache!(PostCache(kc), stats[j], D, Sinv[j]) for j in 1:K]
+    saved = zeros(kc, kc) # Q^-1 of unit i's cluster before its removal
     m = D.m_aux
     aux = Vector{Matrix{Float64}}(undef, m)
     logw = Float64[]
@@ -276,15 +351,18 @@ function update_marginal_labels!(rng::AbstractRNG, state::GibbsState, input::Gib
         if dp.njs[j0] == 0
             aux[1] = state.state_theta[j0].Sigma
         else
-            aux[1] = NobileWishart(rng, ps.rho, rhoR)
-            post[j0] = cluster_post(stats[j0], D, Sinv[j0])
+            aux[1] = NobileWishart(rng, ps.rho, G0)
+            copyto!(saved, post[j0].Qinv)
+            post_cache!(post[j0], stats[j0], D, Sinv[j0])
         end
         for a in 2:m
-            aux[a] = NobileWishart(rng, ps.rho, rhoR)
+            aux[a] = NobileWishart(rng, ps.rho, G0)
         end
-        Hc = cluster_row(D.Wc, D.Xc, i)
         K = length(dp.njs)
-        resize!(logw, K + m); resize!(mus, K + m); resize!(Ss, K + m)
+        while length(Ss) < K + m
+            push!(Ss, zeros(3, 3))
+        end
+        resize!(logw, K + m); resize!(mus, K + m)
         ## the observed outcome minus its global part
         g = isempty(b) ? (0.0, 0.0, 0.0) : unit_mean(D.Xg, D.Wg, b, i)
         di = dobs[i]
@@ -292,8 +370,7 @@ function update_marginal_labels!(rng::AbstractRNG, state::GibbsState, input::Gib
         free = 0
         for j in 1:K
             if dp.njs[j] > 0
-                C, mj = post[j]
-                mus[j], Ss[j] = predictive(C, mj, state.state_theta[j].Sigma, Hc, D, i)
+                mus[j] = predictive!(Ss[j], post[j], state.state_theta[j].Sigma, D, i)
                 logw[j] = log(dp.njs[j]) + (r2 ? r2_score(mus[j], Ss[j], yo, di, g[1]) :
                     logpdf3(Chol3(Ss[j]), z[1] - mus[j][1], z[2] - mus[j][2], z[3] - mus[j][3]))
             else
@@ -302,8 +379,9 @@ function update_marginal_labels!(rng::AbstractRNG, state::GibbsState, input::Gib
             end
         end
         for a in 1:m
-            mus[K + a], Ss[K + a] = D.aux_mean[i], aux[a] + D.aux_cov[i]
-            mu, S = mus[K + a], Ss[K + a]
+            mu, S = D.aux_mean[i], Ss[K + a]
+            S .= aux[a] .+ D.aux_cov[i]
+            mus[K + a] = mu
             logw[K + a] = log(dp.alpha / m) + (r2 ? r2_score(mu, S, yo, di, g[1]) :
                 logpdf3(Chol3(S), z[1] - mu[1], z[2] - mu[2], z[3] - mu[3]))
         end
@@ -313,6 +391,7 @@ function update_marginal_labels!(rng::AbstractRNG, state::GibbsState, input::Gib
             z = r2_draw(rng, mus[ji], Ss[ji], yo, di, g[1])
             sd.dstar[i], sd.y1[i], sd.y0[i] = z[1] + g[1], z[2] + g[2], z[3] + g[3]
         end
+        stay = ji == j0 # j0 is occupied here: an emptied slot scores -Inf
         if ji > K
             ## open a cluster with the chosen auxiliary Sigma
             Sig = aux[ji - K]
@@ -327,14 +406,19 @@ function update_marginal_labels!(rng::AbstractRNG, state::GibbsState, input::Gib
                 push!(state.state_theta, th)
                 push!(stats, ClusterStats(D))
                 push!(Sinv, inv(Sig))
-                push!(post, post[1]) # placeholder, recomputed below
+                push!(post, PostCache(kc))
                 ji = length(dp.njs)
             end
         end
         dp.labels[i] = ji
         dp.njs[ji] += 1
         stats_add!(stats[ji], D, i, z, 1)
-        post[ji] = cluster_post(stats[ji], D, Sinv[ji])
+        if stay
+            copyto!(post[ji].Qinv, saved)
+            post_m!(post[ji], stats[ji], D, Sinv[ji])
+        else
+            post_cache!(post[ji], stats[ji], D, Sinv[ji])
+        end
     end
     compact_components!(state)
     return state

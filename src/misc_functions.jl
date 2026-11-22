@@ -12,12 +12,22 @@ function flip_mat(A::Array) reverse(reverse(A, dims=1), dims=2) end
 ## sample 3x3 A ~ IW(nu, V) with constraint A(1,1)=1
 NobileWishart(nu::Int64, V::Array{Float64}) = NobileWishart(Random.default_rng(), nu, V)
 
-function NobileWishart(rng::AbstractRNG, nu::Int64, V::Array{Float64})
-    
-    ## lower triangular Cholesky factor for V^-1
+## the part of the Nobile draw that depends on V only: with L the lower Cholesky factor of
+## flip(V)^-1, L^-1 and L[3,3]. Precompute it for repeated draws with the same scale matrix.
+struct NobileFactor
+    Linv::Matrix{Float64}
+    L33::Float64
+end
+function NobileFactor(V::AbstractMatrix{Float64})
     I3 = Matrix(1.0I, 3, 3)
-    ##L = chol(flip_mat(V)\I3, Val{:L}) ## deprecated
-    L = adjoint( cholesky( Hermitian(flip_mat(V)\I3) ).U )
+    ## lower triangular Cholesky factor for V^-1
+    L = adjoint( cholesky( Hermitian(flip_mat(Matrix(V))\I3) ).U )
+    return NobileFactor(L\I3, L[3,3])
+end
+
+NobileWishart(rng::AbstractRNG, nu::Int64, V::Array{Float64}) = NobileWishart(rng, nu, NobileFactor(V))
+
+function NobileWishart(rng::AbstractRNG, nu::Int64, F::NobileFactor)
 
     ## initialize lower triangular A
     A = zeros(3, 3)
@@ -26,15 +36,14 @@ function NobileWishart(rng::AbstractRNG, nu::Int64, V::Array{Float64})
     ## fill in diagonal
     A[1,1] = sqrt( rand(rng, Chisq(nu)) )
     A[2,2] = sqrt( rand(rng, Chisq(nu-1)) )
-    A[3,3] = 1/L[3,3]
+    A[3,3] = 1/F.L33
 
     ## construct out = (L^-1)'(A^-1)'(A^-1)(L^-1)
-    L = L\I3
-    A = A\I3 
-    A = *(A, L) # (A^-1)(L^-1)
-    A = *(A', A) # Sigma
+    A = inv(LowerTriangular(A))
+    A = A * F.Linv # (A^-1)(L^-1)
+    A = A' * A # Sigma
 
-    return flip_mat(A)
+    return flip_mat(Matrix(A))
 
 end
 

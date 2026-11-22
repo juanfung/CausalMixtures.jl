@@ -105,6 +105,36 @@ end
     @test isapprox(lpa, log(mca); atol=0.03)
 end
 
+@testset "label-step posterior cache and predictive = cluster_post and the dense predictive ($sl)" for sl in (:common, :cluster)
+    state, input, D, rng = setup(sl)
+    b = CM.global_slopes(state, D)
+    kc = length(D.cidx)
+    for j in 1:state.state_dp.J, i in first(state.state_dp.members[j], 2)
+        Sig = state.state_theta[j].Sigma
+        st = CM.cluster_stats(state, D, b, state.state_dp.members[j])
+        C, m = CM.cluster_post(st, D, inv(Sig))
+        pc = CM.post_cache!(CM.PostCache(kc), st, D, inv(Sig))
+        @test pc.Qinv ≈ inv(Matrix(C)) && pc.Qinv == pc.Qinv'
+        @test pc.m ≈ m
+        S = zeros(3, 3)
+        mu = CM.predictive!(S, pc, Sig, D, i)
+        Hc = Hc_dense(D, i)
+        @test collect(mu) ≈ Hc * m
+        @test S ≈ Sig + Hc * inv(Matrix(C)) * Hc' && S == S'
+        z = CM.ztilde(state, D, b, i)
+        @test CM.logpdf3(CM.Chol3(S), (collect(z) - collect(mu))...) ≈ CM.log_predictive(C, m, Sig, Hc, D, i, z)
+    end
+end
+
+@testset "NobileWishart with a precomputed factor = the direct draw" begin
+    V = [1.0 0.2 0.1; 0.2 1.53 0.3; 0.1 0.3 1.53]
+    F = CM.NobileFactor(V)
+    for s in 1:5
+        @test CM.NobileWishart(Xoshiro(s), 10, V) == CM.NobileWishart(Xoshiro(s), 10, F)
+    end
+    @test CM.NobileWishart(Xoshiro(1), 10, F)[1, 1] ≈ 1
+end
+
 @testset "beta^c and b draws follow their dense full conditionals ($sl)" for sl in (:common, :cluster)
     state, input, D, rng = setup(sl)
     N = 10_000
