@@ -52,6 +52,8 @@ InputData(; y=ScaleData(a=[0.0]), d=[0], lower=[0.0], upper=[0.0], Hmat=sparse([
 ## and labels every `latent_thin`-th iteration (0 = never). `slopes` is the slope mode of the
 ## Design A sampler (model = "marginal"): :common (shared covariate slopes, the DPM over the
 ## intercepts and Sigma) or :cluster (the full beta per cluster); other models ignore it.
+## `label_step` is Design A's label step: :r2 (the joint label-and-latent step, Phase 4b) or
+## :augmented (scored on the current latent data, Phase 4a).
 mutable struct InputParams
     M::Int64
     scale_data::Tuple{Bool,Bool}
@@ -60,16 +62,19 @@ mutable struct InputParams
     thin::Int64
     latent_thin::Int64
     slopes::Symbol
-    function InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes)
+    label_step::Symbol
+    function InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step)
         thin >= 1 || throw(ArgumentError("thin must be >= 1, got $thin"))
         latent_thin >= 0 || throw(ArgumentError("latent_thin must be >= 0, got $latent_thin"))
         slopes in (:common, :cluster) || throw(ArgumentError("slopes must be :common or :cluster, got $slopes"))
-        return new(M, scale_data, verbose, model, thin, latent_thin, slopes)
+        label_step in (:r2, :augmented) || throw(ArgumentError("label_step must be :r2 or :augmented, got $label_step"))
+        return new(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step)
     end
 end
 
-InputParams(; M=100, scale_data=(false,false), verbose=true, model="dpm", thin=1, latent_thin=0, slopes=:common) =
-    InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes)
+InputParams(; M=100, scale_data=(false,false), verbose=true, model="dpm", thin=1, latent_thin=0, slopes=:common,
+            label_step=:r2) =
+    InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step)
 ## set default model to dpm
 InputParams(m, s, v) = InputParams(M=m, scale_data=s, verbose=v, model="dpm")
 

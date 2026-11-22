@@ -11,9 +11,11 @@
 ## prior_beta, which must not be correlated with each other), Sigma ~ NobileWishart(rho, rho R),
 ## alpha ~ Gamma(shape, rate).
 ##
-## One sweep (4a: no R2 joint label/latent step, no R3 collapsed sigma23 step yet):
-##  (i)   labels: Neal's Algorithm 8 over Sigma with beta^c integrated out, scored on the full
-##        augmented z~_i = z_i - H^g_i b. Existing cluster j: log n_{-i,j} +
+## One sweep (no R3 collapsed sigma23 step yet):
+##  (i)   labels: Neal's Algorithm 8 over Sigma with beta^c integrated out. Default (Phase 4b,
+##        label_step = :r2): the joint label-and-latent step R2, which scores the observed data
+##        (d_i, y_i) only and redraws (d*_i, y_miss,i) from the chosen cluster's predictive.
+##        label_step = :augmented (Phase 4a): scored on the full augmented z~_i = z_i - H^g_i b. Existing cluster j: log n_{-i,j} +
 ##        log N3(z~_i | H^c_i Q_{j,-i}^-1 r_{j,-i}, Sigma_j + H^c_i Q_{j,-i}^-1 H^c_i'); auxiliary
 ##        cluster: log(alpha/m) + log N3(z~_i | H^c_i mu_c, Sigma_aux + H^c_i V_c H^c_i'), m = 2,
 ##        a singleton's Sigma in auxiliary slot 1. Per-cluster Sigma-free statistics are updated
@@ -198,12 +200,63 @@ end
 ## --------------------------------------------------------------------------- #
 ## (i) labels
 
-function update_marginal_labels!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, D::DesignA)
+## --------------------------------------------------------------------------- #
+## R2 (Phase 4b): score a candidate cluster on the observed data only, then draw the latent data
+## from its predictive. With z~ ~ N3(mu, S) the predictive of a candidate cluster, o = 2 if d = 1
+## and 3 if d = 0, s = 2d - 1, y~ the observed outcome minus its global part, and g_d = (H^g_i b)_d
+## the global part of the selection index (zero under slopes = :cluster),
+##   p(d, y~) = N(y~ | mu_o, S_oo) * Phi(s * (mu_d + g_d + S_do/S_oo (y~ - mu_o)) / sqrt(S_dd - S_do^2/S_oo)),
+## which is the integral of N3(z~ | mu, S) over the unobserved outcome and the half-line of
+## z~_d that agrees with d: d = 1{d* > 0} with d* = z~_d + g_d, so the cut-off on z~_d is -g_d.
+
+## the beta^c-collapsed predictive (mu, S) of z~_i for a cluster with posterior (C, m) and Sigma
+function predictive(C::Cholesky, m::Vector{Float64}, Sigma::AbstractMatrix{Float64},
+                    Hc::Matrix{Float64}, D::DesignA, i::Integer)
+    return unit_mean(D.Xc, D.Wc, m, i), Sigma + Hc * (C \ Matrix(Hc'))
+end
+
+## log p(d, y~ | mu, S): the R2 observed-data score. `gd` is the global part of the selection
+## index, (H^g_i b)_d: d = 1{d* > 0} with d* = z~_d + gd, so the threshold on z~_d is -gd.
+function r2_score(mu::NTuple{3,Float64}, S::AbstractMatrix{Float64}, yo::Real, d::Integer, gd::Real=0.0)
+    o = d == 1 ? 2 : 3
+    s = 2d - 1
+    Soo = S[o, o]
+    cm = mu[1] + gd + S[1, o] / Soo * (yo - mu[o])
+    cv = S[1, 1] - S[1, o]^2 / Soo
+    return -0.5 * (log(2pi * Soo) + (yo - mu[o])^2 / Soo) + logcdf(Normal(), s * cm / sqrt(cv))
+end
+
+## draw (d*, y_miss) from N3(mu, S) given the observed y~_o and the sign of d*; returns z~
+function r2_draw(rng::AbstractRNG, mu::NTuple{3,Float64}, S::AbstractMatrix{Float64}, yo::Real, d::Integer,
+                 gd::Real=0.0)
+    o, mi = d == 1 ? (2, 3) : (3, 2)
+    Soo = S[o, o]
+    ## z~_d | y~_o, truncated to the side of -gd given by d (d* = z~_d + gd on the side of 0)
+    cm = mu[1] + S[1, o] / Soo * (yo - mu[o])
+    cv = S[1, 1] - S[1, o]^2 / Soo
+    ds = rand(rng, truncated(Normal(cm, sqrt(cv)), d == 1 ? -gd : -Inf, d == 1 ? Inf : -gd))
+    ## y_miss | d*, y~_o: Gaussian conditional on the coordinates (1, o)
+    a11, a12, a22 = S[1, 1], S[1, o], Soo
+    det = a11 * a22 - a12^2
+    c1, c2 = S[mi, 1], S[mi, o]
+    k1 = (c1 * a22 - c2 * a12) / det # S_{m,(1,o)} S_{(1,o),(1,o)}^-1
+    k2 = (c2 * a11 - c1 * a12) / det
+    ym = mu[mi] + k1 * (ds - mu[1]) + k2 * (yo - mu[o]) + sqrt(max(S[mi, mi] - k1 * c1 - k2 * c2, 0.0)) * randn(rng)
+    return d == 1 ? (ds, Float64(yo), ym) : (ds, ym, Float64(yo))
+end
+
+## (i) labels. label_step = :r2 (default): the joint label-and-latent step R2, scoring the
+## observed data and redrawing unit i's latent data from the chosen cluster's predictive.
+## label_step = :augmented (Phase 4a): score the current augmented z~_i, latent data unchanged.
+function update_marginal_labels!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, D::DesignA;
+                                 r2::Bool = input.params.label_step == :r2)
     dp = state.state_dp
     ps = input.priors.prior_theta.prior_Sigma
     rhoR = ps.rho .* ps.R
     b = global_slopes(state, D)
     K = length(dp.njs)
+    sd = state.state_data
+    y, dobs = input.data.y.a, input.data.d
     ## per-slot statistics, Sigma^-1 and posterior caches
     stats = [cluster_stats(state, D, b, dp.members[j]) for j in 1:K]
     Sinv = [inv(state.state_theta[j].Sigma) for j in 1:K]
@@ -211,6 +264,8 @@ function update_marginal_labels!(rng::AbstractRNG, state::GibbsState, input::Gib
     m = D.m_aux
     aux = Vector{Matrix{Float64}}(undef, m)
     logw = Float64[]
+    mus = NTuple{3,Float64}[]
+    Ss = Matrix{Float64}[]
     @inbounds for i in 1:input.dims.n
         z = ztilde(state, D, b, i)
         j0 = dp.labels[i]
@@ -229,23 +284,35 @@ function update_marginal_labels!(rng::AbstractRNG, state::GibbsState, input::Gib
         end
         Hc = cluster_row(D.Wc, D.Xc, i)
         K = length(dp.njs)
-        resize!(logw, K + m)
+        resize!(logw, K + m); resize!(mus, K + m); resize!(Ss, K + m)
+        ## the observed outcome minus its global part
+        g = isempty(b) ? (0.0, 0.0, 0.0) : unit_mean(D.Xg, D.Wg, b, i)
+        di = dobs[i]
+        yo = y[i] - (di == 1 ? g[2] : g[3])
         free = 0
         for j in 1:K
             if dp.njs[j] > 0
                 C, mj = post[j]
-                logw[j] = log(dp.njs[j]) + log_predictive(C, mj, state.state_theta[j].Sigma, Hc, D, i, z)
+                mus[j], Ss[j] = predictive(C, mj, state.state_theta[j].Sigma, Hc, D, i)
+                logw[j] = log(dp.njs[j]) + (r2 ? r2_score(mus[j], Ss[j], yo, di, g[1]) :
+                    logpdf3(Chol3(Ss[j]), z[1] - mus[j][1], z[2] - mus[j][2], z[3] - mus[j][3]))
             else
                 logw[j] = -Inf
                 free == 0 && (free = j)
             end
         end
-        am, ac = D.aux_mean[i], D.aux_cov[i]
         for a in 1:m
-            logw[K + a] = log(dp.alpha / m) +
-                logpdf3(Chol3(aux[a] + ac), z[1] - am[1], z[2] - am[2], z[3] - am[3])
+            mus[K + a], Ss[K + a] = D.aux_mean[i], aux[a] + D.aux_cov[i]
+            mu, S = mus[K + a], Ss[K + a]
+            logw[K + a] = log(dp.alpha / m) + (r2 ? r2_score(mu, S, yo, di, g[1]) :
+                logpdf3(Chol3(S), z[1] - mu[1], z[2] - mu[2], z[3] - mu[3]))
         end
         ji = sample_logweights(rng, logw)
+        if r2
+            ## the latent data from the chosen cluster's predictive, given d and y~
+            z = r2_draw(rng, mus[ji], Ss[ji], yo, di, g[1])
+            sd.dstar[i], sd.y1[i], sd.y0[i] = z[1] + g[1], z[2] + g[2], z[3] + g[3]
+        end
         if ji > K
             ## open a cluster with the chosen auxiliary Sigma
             Sig = aux[ji - K]
@@ -352,7 +419,8 @@ end
 
 ## one Design A sweep, (i)-(vi); test = true keeps the latent data fixed
 function marginal_sweep!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, D::DesignA; test::Bool=false)
-    update_marginal_labels!(rng, state, input, D)        # (i)
+    ## (i) R2 by default; test = true keeps the latent data fixed, so it scores z~ instead
+    update_marginal_labels!(rng, state, input, D; r2 = input.params.label_step == :r2 && !test)
     update_marginal_coefs!(rng, state, D)                # (ii)
     update_global_slopes!(rng, state, D)                 # (iii)
     update_marginal_sigmas!(rng, state, input)           # (iv)
