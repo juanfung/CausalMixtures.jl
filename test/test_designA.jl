@@ -159,4 +159,82 @@ end
     end
 end
 
+@testset "R2 observed-data score = integral of the predictive over the unobserved coordinates" begin
+    rng = test_rng()
+    ## gd is the global part of the selection index: the cut-off on z~_d is -gd
+    for rep in 1:12, d in (0, 1), gd in (0.0, 0.8 * randn(rng))
+        A = randn(rng, 3, 3); S = A * A' + 0.3I
+        mu = Tuple(randn(rng, 3))
+        o = d == 1 ? 2 : 3
+        yo = mu[o] + sqrt(S[o, o]) * randn(rng)
+        ## y_miss integrates out exactly; integrate the (d*, y_o) bivariate density over the
+        ## half-line of d* given by d with the trapezoid rule
+        B = MvNormal([mu[1], mu[o]], Symmetric(S[[1, o], [1, o]]))
+        sdd = sqrt(S[1, 1])
+        lo, hi = d == 1 ? (-gd, mu[1] + 12sdd) : (mu[1] - 12sdd, -gd)
+        if hi <= lo
+            continue
+        end
+        g = range(lo, hi, length=400_001)
+        f = [pdf(B, [x, yo]) for x in g]
+        integral = step(g) * (sum(f) - (f[1] + f[end]) / 2)
+        sc = CM.r2_score(mu, S, yo, d, gd)
+        @test isapprox(sc, log(integral); atol=1e-6) || (rep, d, gd, sc, log(integral))
+    end
+    ## far in the tail: logcdf keeps the score finite
+    S = [1.0 0.5 0.2; 0.5 1.0 0.1; 0.2 0.1 1.0]
+    @test isfinite(CM.r2_score((40.0, 0.0, 0.0), S, 0.0, 0))
+    @test CM.r2_score((40.0, 0.0, 0.0), S, 0.0, 0) < -500
+end
+
+@testset "R2 draws follow the truncated predictive conditional" begin
+    rng = test_rng()
+    for (S, mu) in (([1.0 0.6 -0.4; 0.6 1.5 0.2; -0.4 0.2 0.8], (0.3, -0.2, 0.5)),
+                    ([1.0 -0.7 0.7; -0.7 1.0 -0.1; 0.7 -0.1 1.0], (-1.0, 1.0, 0.0))), d in (0, 1), gd in (0.0, 0.6, -0.9)
+        o, mi = d == 1 ? (2, 3) : (3, 2)
+        yo = mu[o] + 0.7
+        N = 100_000
+        draws = reduce(vcat, [collect(CM.r2_draw(rng, mu, S, yo, d, gd))' for _ in 1:N])
+        @test all(draws[:, o] .== yo)
+        @test all(d == 1 ? draws[:, 1] .> -gd : draws[:, 1] .< -gd)
+        ## reference: (d*, y_miss) | y_o by generic Gaussian conditioning, then rejection on the sign
+        u = [1, mi]
+        K = S[u, [o]] / S[o, o]
+        Cm = vec(collect(mu)[u] .+ K .* (yo - mu[o]))
+        Cv = Symmetric(S[u, u] - K * S[[o], u])
+        ## accumulate accepted reference draws in batches (the cut-off can sit in the tail)
+        R = MvNormal(Cm, Cv)
+        acc = Matrix{Float64}[]
+        nacc, ntot = 0, 0
+        while nacc < N && ntot < 40_000_000
+            x = rand(rng, R, 1_000_000)
+            keep = x[:, (x[1, :] .> -gd) .== (d == 1)]
+            push!(acc, permutedims(keep)); nacc += size(keep, 2); ntot += 1_000_000
+        end
+        ref = reduce(vcat, acc)
+        @test size(ref, 1) > 5000
+        X = draws[:, [1, mi]]
+        @test maximum(abs, two_sample_zscores(X, ref)) < 4.5
+        sq(Y) = (Y .- mean(Y, dims=1)) .^ 2
+        @test maximum(abs, two_sample_zscores(sq(X), sq(ref))) < 4.5
+        @test abs(cor(X[:, 1], X[:, 2]) - cor(ref[:, 1], ref[:, 2])) < 0.02
+    end
+end
+
+@testset "label_step = :r2 is the default; :augmented keeps the 4a step" begin
+    @test CM.InputParams().label_step == :r2
+    @test_throws ArgumentError CM.InputParams(label_step=:nope)
+    data = generate_hedonic_data(60, 5)
+    raw = CM.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
+    for ls in (:r2, :augmented)
+        params = CM.InputParams(M=20, scale_data=(true, true), verbose=false, model="marginal", label_step=ls)
+        rng = Xoshiro(2)
+        st, input, out = CM.dpm!(CM.dpm_init(raw, setup_default_priors(2, 3, slopes=:common), params; rng=rng)...; rng=rng)
+        ## the observed outcome is never changed and d* keeps the sign of d
+        y1, y0 = st.state_data.y1, st.state_data.y0
+        @test ifelse.(input.data.d .== 1, y1, y0) == input.data.y.a
+        @test all((st.state_data.dstar .> 0) .== (input.data.d .== 1))
+    end
+end
+
 end # Design A
