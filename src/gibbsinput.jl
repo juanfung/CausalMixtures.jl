@@ -53,7 +53,8 @@ InputData(; y=ScaleData(a=[0.0]), d=[0], lower=[0.0], upper=[0.0], Hmat=sparse([
 ## Design A sampler (model = "marginal"): :common (shared covariate slopes, the DPM over the
 ## intercepts and Sigma) or :cluster (the full beta per cluster); other models ignore it.
 ## `label_step` is Design A's label step: :r2 (the joint label-and-latent step, Phase 4b) or
-## :augmented (scored on the current latent data, Phase 4a).
+## :augmented (scored on the current latent data, Phase 4a). `sigma23_step` turns on R3, the
+## collapsed sigma23 step (Phase 4c), in the marginal and gaussian samplers.
 mutable struct InputParams
     M::Int64
     scale_data::Tuple{Bool,Bool}
@@ -63,18 +64,19 @@ mutable struct InputParams
     latent_thin::Int64
     slopes::Symbol
     label_step::Symbol
-    function InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step)
+    sigma23_step::Bool
+    function InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step, sigma23_step)
         thin >= 1 || throw(ArgumentError("thin must be >= 1, got $thin"))
         latent_thin >= 0 || throw(ArgumentError("latent_thin must be >= 0, got $latent_thin"))
         slopes in (:common, :cluster) || throw(ArgumentError("slopes must be :common or :cluster, got $slopes"))
         label_step in (:r2, :augmented) || throw(ArgumentError("label_step must be :r2 or :augmented, got $label_step"))
-        return new(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step)
+        return new(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step, sigma23_step)
     end
 end
 
 InputParams(; M=100, scale_data=(false,false), verbose=true, model="dpm", thin=1, latent_thin=0, slopes=:common,
-            label_step=:r2) =
-    InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step)
+            label_step=:r2, sigma23_step=true) =
+    InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step, sigma23_step)
 ## set default model to dpm
 InputParams(m, s, v) = InputParams(M=m, scale_data=s, verbose=v, model="dpm")
 

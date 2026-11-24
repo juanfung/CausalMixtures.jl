@@ -345,12 +345,71 @@ function update_sampler!(state::GibbsState, M::Int64)
 end
 
 ## --------------------------------------------------------------------------- #
+## R3: the collapsed sigma23 step (Phase 4c). Each unit observes one outcome, so with y_miss
+## integrated out the likelihood of (d*, y_obs) involves sigma12, sigma13, sigma22, sigma33 only,
+## and the full conditional of sigma23 is the PRIOR conditional of the restricted inverse
+## Wishart, NobileWishart(rho, rho R):
+##   p(sigma23 | rest) ∝ |Sigma|^{-(rho+4)/2} exp(-tr(rho R Sigma^-1) / 2)
+## on the positive-definite interval |sigma23 - s12 s13| < sqrt((s22 - s12^2)(s33 - s13^2)).
+## sigma23 is drawn by slice sampling on that bounded interval (shrinkage from the full interval,
+## exact), then y_miss of every member is redrawn given (d*, y_obs) and the new Sigma: a
+## partially collapsed step, so nothing after it may condition on the old y_miss.
+
+## log density of sigma23 = s under |Sigma|^{-(nu+4)/2} exp(-tr(V Sigma^-1)/2), other entries of
+## Sigma fixed (sigma11 = 1), up to a constant; -Inf outside the positive-definite interval
+function sigma23_logdens(S::AbstractMatrix{Float64}, s::Real, V::AbstractMatrix{Float64}, nu::Real)
+    a, b, c, e = S[1, 2], S[1, 3], S[2, 2], S[3, 3]
+    det = (c - a^2) * (e - b^2) - (s - a * b)^2
+    det > 0 || return -Inf
+    ## adjugate of [1 a b; a c s; b s e]
+    i11, i22, i33 = c * e - s^2, e - b^2, c - a^2
+    i12, i13, i23 = b * s - a * e, a * s - b * c, a * b - s
+    tr = (V[1, 1] * i11 + V[2, 2] * i22 + V[3, 3] * i33 +
+          2 * (V[1, 2] * i12 + V[1, 3] * i13 + V[2, 3] * i23)) / det
+    return -(nu + 4) / 2 * log(det) - tr / 2
+end
+
+## the positive-definite interval of sigma23 given the other entries
+function sigma23_interval(S::AbstractMatrix{Float64})
+    a, b = S[1, 2], S[1, 3]
+    w = sqrt((S[2, 2] - a^2) * (S[3, 3] - b^2))
+    return a * b - w, a * b + w
+end
+
+## one slice-sampling update of sigma23 from its prior conditional; shrinkage on the bounded
+## interval (Neal 2003), so no stepping out
+function slice_sigma23(rng::AbstractRNG, S::AbstractMatrix{Float64}, V::AbstractMatrix{Float64}, nu::Real)
+    L, U = sigma23_interval(S)
+    x0 = S[2, 3]
+    logy = sigma23_logdens(S, x0, V, nu) - randexp(rng)
+    for _ in 1:10_000
+        x1 = L + (U - L) * rand(rng)
+        sigma23_logdens(S, x1, V, nu) > logy && return x1
+        x1 < x0 ? (L = x1) : (U = x1)
+    end
+    error("slice_sigma23: no acceptance after 10000 shrinkage steps")
+end
+
+## R3 for component j with members idx: sigma23 from its prior conditional, then y_miss | d*,
+## y_obs, theta_j for every member
+function update_sigma23!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, j::Integer, idx::AbstractVector{<:Integer})
+    ps = input.priors.prior_theta.prior_Sigma
+    th = state.state_theta[j]
+    S = copy(th.Sigma)
+    S[2, 3] = S[3, 2] = slice_sigma23(rng, S, ps.rho .* ps.R, ps.rho)
+    state.state_theta[j] = Theta(beta=th.beta, Sigma=S)
+    return update_ymiss_only!(rng, state, input, j, idx)
+end
+
+## --------------------------------------------------------------------------- #
 ## specialized functions for Gaussian model
 
 function update_gaussian_params!(rng::AbstractRNG, state::GibbsState, input::GibbsInput)
     idx = 1:input.dims.n
     ## update theta
     state = update_theta!(rng, state, input, 1, idx)
+    ## R3: collapsed sigma23 step (and y_miss redraw)
+    input.params.sigma23_step && update_sigma23!(rng, state, input, 1, idx)
     ## update latent data
     state = update_latent!(rng, state, input, 1, idx)
     return state

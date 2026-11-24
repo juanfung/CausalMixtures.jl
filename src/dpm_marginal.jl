@@ -11,7 +11,7 @@
 ## prior_beta, which must not be correlated with each other), Sigma ~ NobileWishart(rho, rho R),
 ## alpha ~ Gamma(shape, rate).
 ##
-## One sweep (no R3 collapsed sigma23 step yet):
+## One sweep:
 ##  (i)   labels: Neal's Algorithm 8 over Sigma with beta^c integrated out. Default (Phase 4b,
 ##        label_step = :r2): the joint label-and-latent step R2, which scores the observed data
 ##        (d_i, y_i) only and redraws (d*_i, y_miss,i) from the chosen cluster's predictive.
@@ -23,6 +23,9 @@
 ##  (ii)  beta^c_j | Sigma_j, z, b ~ N(Q_j^-1 r_j, Q_j^-1)
 ##  (iii) b | everything (:common only), accumulated per cluster with Sigma_j^-1 weights
 ##  (iv)  Sigma_j ~ NobileWishart(rho + n_j, rho R + sum e e')
+##  (iv') R3 (sigma23_step = true, Phase 4c): sigma23_j from its prior conditional (y_miss
+##        integrated out, the likelihood does not involve sigma23), by slice sampling, then
+##        y_miss of j's members redrawn (update_sigma23!)
 ##  (v)   latent data: the y_miss and d* conditionals of update_latent!
 ##  (vi)  alpha: Escobar-West with the random indicator (update_alpha!)
 ## Steps (i)-(ii) are a partially collapsed Gibbs kernel: (i) samples c | Sigma, z, b with beta^c
@@ -508,6 +511,11 @@ function marginal_sweep!(rng::AbstractRNG, state::GibbsState, input::GibbsInput,
     update_marginal_coefs!(rng, state, D)                # (ii)
     update_global_slopes!(rng, state, D)                 # (iii)
     update_marginal_sigmas!(rng, state, input)           # (iv)
+    if !test && input.params.sigma23_step                # (iv') R3
+        for j in 1:state.state_dp.J
+            update_sigma23!(rng, state, input, j, state.state_dp.members[j])
+        end
+    end
     if !test                                             # (v)
         for j in 1:state.state_dp.J
             update_latent!(rng, state, input, j, state.state_dp.members[j])
