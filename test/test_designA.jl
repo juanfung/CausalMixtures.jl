@@ -31,7 +31,13 @@ Hg_dense(D, i) = CM.cluster_row(D.Wg, D.Xg, i)
     n = input.dims.n
     @test sort(vcat(D.cidx, D.gidx)) == 1:(kz + 2kx)
     pb = input.priors.prior_theta.prior_beta
-    @test D.Vc ≈ pb.Vcov[D.cidx, D.cidx]
+    D0 = DesignA(input)  # fresh: the fixed prior (hierarchical: (m, T) at the hyperprior means)
+    @test D0.Vc ≈ pb.Vcov[D.cidx, D.cidx] && D0.mu_c ≈ pb.mu[D.cidx]
+    ## after sweeps, D's intercept block is the state's (m, diag(tau2)); the slopes keep the fixed prior
+    h = state.state_hyper
+    @test D.mu_c[D.icidx] ≈ h.m && diag(D.Vc)[D.icidx] ≈ h.tau2
+    oth = setdiff(1:length(D.cidx), D.icidx)
+    @test D.Vc[oth, oth] ≈ pb.Vcov[D.cidx[oth], D.cidx[oth]]
     for i in (1, 7, n)
         Hi = H[[i, i + n, i + 2n], :]
         ## H_i beta = H^c_i beta[cidx] + H^g_i beta[gidx]
@@ -40,7 +46,7 @@ Hg_dense(D, i) = CM.cluster_row(D.Wg, D.Xg, i)
     end
     if sl == :common
         @test D.cidx == [1, kz + 1, kz + kx + 1]                 # intercepts
-        @test diag(D.Vc) ≈ [0.25, 1, 1]
+        @test diag(D0.Vc) ≈ [0.25, 1, 1]
         @test diag(inv(D.Vg_inv)) ≈ [0.25, 0.25, 1, 1]          # probit slopes .5², outcome slopes 1
         ## the shared slopes are the same in every cluster
         @test all(t -> t.beta[D.gidx] == state.state_theta[1].beta[D.gidx], state.state_theta)

@@ -95,7 +95,7 @@ end
 end
 
 @testset "update_sigma23! changes sigma23 and y_miss only; option wiring" begin
-    @test CM3.InputParams().sigma23_step == true
+    @test CM3.InputParams().sigma23_step == false
     data = generate_hedonic_data(60, 5)
     raw = CM3.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
     for (model, sl) in (("marginal", :common), ("marginal", :cluster), ("gaussian", :cluster))
