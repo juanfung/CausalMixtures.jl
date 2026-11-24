@@ -35,7 +35,7 @@ function dpm_fmn!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=fals
         ## 3. save iteration m draws
         if verbose && mod(m, max(1, M/10)) == 0 @printf("\nDone!") end
         
-        out = update_out!(state, out, m)
+        out = update_out!(state, out, m, input)
         
     end
     

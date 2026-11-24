@@ -185,6 +185,9 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
         for j in 1:state_dp.J
             state_theta[j] = Theta(beta=full_beta(D, state_theta[j].beta[D.cidx], b), Sigma=state_theta[j].Sigma)
         end
+        state_hyper = D.hier ? StateHyper(m=copy(D.mu_m), tau2=D.tau_scale ./ (D.tau_shape - 1)) : StateHyper()
+    else
+        state_hyper = StateHyper()
     end
     
     ## 2d. collect sampler state parameters
@@ -197,7 +200,7 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     
     ## 2e. collect all state variables
     state = GibbsState(state_data=state_data, state_dp=state_dp,
-                       state_theta=state_theta, state_sampler=state_sampler)
+                       state_theta=state_theta, state_sampler=state_sampler, state_hyper=state_hyper)
     
     ## 3. pre-allocate output
     out = GibbsOut(params)
@@ -229,6 +232,8 @@ function dpm_chain!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=fa
     append!(out.out_dp, out_new.out_dp)
     append!(out.out_theta, out_new.out_theta)
     append!(out.out_labels, out_new.out_labels)
+    append!(out.out_hyper, out_new.out_hyper)
+    append!(out.out_sep, out_new.out_sep)
     return (state, input, out)
 end
 
@@ -245,8 +250,19 @@ function dpm!(state::GibbsState, input::GibbsInput, out::GibbsOut=GibbsOut(0); t
         ## run new chain
         dpm_sampler = set_sampler(input.params.model)
         out_tup = dpm_sampler(state, input, out, test=test, rng=rng)
-    end    
-    return out_tup    
+    end
+    input.params.model == "marginal" && warn_separated(out_tup[3])
+    return out_tup
+end
+
+## warn when the posterior mean of the separated-units share (units in clusters under 5% or
+## over 95% treated) exceeds `level`
+function warn_separated(out::GibbsOut; level::Real=0.05)
+    sep = filter(isfinite, out.out_sep)
+    isempty(sep) && return nothing
+    s = mean(sep)
+    s > level && @warn @sprintf("%.1f%% of units sit, on average, in clusters that are under 5%% or over 95%% treated: their treated or control outcome is identified from little data (separated-units diagnostic, out.out_sep)", 100s)
+    return nothing
 end
 
 ## calls:

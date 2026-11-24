@@ -130,16 +130,28 @@ end
 StateSampler(; chain=false, batch_n=1, batch_m=0, batch_1=1, Vmu=[0.0], zdenom=0.0) =
     StateSampler(chain, batch_n, batch_m, batch_1, Vmu, zdenom)
 
+## hyperparameters of the hierarchical cluster intercepts (Design A, hierarchical = true, Phase
+## 4d): a_j ~ N(m, diag(tau2)), a_j = (a_d, a_1, a_0); both vectors empty when not in use
+mutable struct StateHyper
+    m::Vector{Float64}
+    tau2::Vector{Float64}
+end
+
+StateHyper(; m=Float64[], tau2=Float64[]) = StateHyper(m, tau2)
+Base.copy(h::StateHyper) = StateHyper(copy(h.m), copy(h.tau2))
+
 ## current state
 mutable struct GibbsState
     state_data::StateData
     state_dp::StateDP
     state_theta::StateTheta
     state_sampler::StateSampler
+    state_hyper::StateHyper
 end
 
-GibbsState(; state_data=StateData(), state_dp=StateDP(), state_theta=StateTheta(), state_sampler=StateSampler()) =
-    GibbsState(state_data, state_dp, state_theta, state_sampler)
+GibbsState(; state_data=StateData(), state_dp=StateDP(), state_theta=StateTheta(), state_sampler=StateSampler(),
+           state_hyper=StateHyper()) =
+    GibbsState(state_data, state_dp, state_theta, state_sampler, state_hyper)
 
 ## --------------------------------------------------------------------------- #
 export BlockedWeights, StateDP

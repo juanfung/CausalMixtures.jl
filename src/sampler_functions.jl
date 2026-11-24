@@ -316,18 +316,36 @@ function prepare_out!(out::GibbsOut, params::InputParams)
     nl = params.latent_thin == 0 ? 0 : params.M ÷ params.latent_thin
     resize!(out.out_dp, params.M ÷ params.thin)
     resize!(out.out_theta, params.M ÷ params.thin)
+    resize!(out.out_hyper, params.M ÷ params.thin)
+    resize!(out.out_sep, params.M ÷ params.thin)
     resize!(out.out_data, nl)
     resize!(out.out_labels, nl)
     return out
 end
 
+## the separated-units share: the share of units in clusters whose treated share is under 5% or
+## over 95% (Phase 4d diagnostic: in such clusters the treated or the control outcome is
+## identified from almost no data)
+function separated_share(dp::StateDP, d::AbstractVector{<:Integer}; lo::Real=0.05, hi::Real=0.95)
+    n = length(dp.labels)
+    nsep = 0
+    for idx in dp.members
+        isempty(idx) && continue
+        t = count(i -> d[i] == 1, idx) / length(idx)
+        (t < lo || t > hi) && (nsep += length(idx))
+    end
+    return nsep / n
+end
+
 ## save iteration m: theta, counts and alpha every thin-th iteration (the Theta objects are
 ## shared, not copied), latent data and labels every latent_thin-th iteration
-function update_out!(state::GibbsState, out::GibbsOut, m::Int64)
+function update_out!(state::GibbsState, out::GibbsOut, m::Int64, input::GibbsInput)
     if m % out.thin == 0
         s = m ÷ out.thin
         out.out_dp[s] = DrawDP(state.state_dp)
         out.out_theta[s] = copy(state.state_theta)
+        out.out_hyper[s] = vcat(state.state_hyper.m, state.state_hyper.tau2)
+        out.out_sep[s] = separated_share(state.state_dp, input.data.d)
     end
     if out.latent_thin > 0 && m % out.latent_thin == 0
         s = m ÷ out.latent_thin

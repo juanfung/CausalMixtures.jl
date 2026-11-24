@@ -28,6 +28,11 @@
 ##        y_miss of j's members redrawn (update_sigma23!)
 ##  (v)   latent data: the y_miss and d* conditionals of update_latent!
 ##  (vi)  alpha: Escobar-West with the random indicator (update_alpha!)
+##  (vii) hierarchical = true (Phase 4d): the cluster intercepts a_j = (a_d, a_1, a_0)_j have prior
+##        N(m, diag(tau2)), which is the intercept block of the beta^c prior in (i)-(ii) (the
+##        auxiliary predictives included; the slopes keep their fixed prior); m | a, tau2 and
+##        tau2 | a, m are drawn last (update_hyper!). Hyperpriors: m ~ N(mu, V) and
+##        tau2_l ~ IG(3, 2 V_l), with (mu, V) the fixed intercept prior (C3: V = (0.5^2, 1, 1)).
 ## Steps (i)-(ii) are a partially collapsed Gibbs kernel: (i) samples c | Sigma, z, b with beta^c
 ## integrated out, and (ii) redraws every beta^c from its full conditional.
 ##
@@ -59,6 +64,15 @@ struct DesignA
     aux_mean::Vector{NTuple{3,Float64}} # H^c_i mu_c
     aux_cov::Vector{Matrix{Float64}}    # H^c_i V_c H^c_i'
     m_aux::Int
+    ## hierarchical intercepts (Phase 4d): the intercept block of the beta^c prior is (m, diag(tau2)),
+    ## m ~ N(mu_m, diag(Vm)), tau2_l ~ IG(tau_shape, tau_scale_l); mu_c, Vc and everything
+    ## derived from them are rewritten in place by set_cprior!
+    hier::Bool
+    icidx::Vector{Int}             # positions of (a_d, a_1, a_0) within beta^c
+    mu_m::Vector{Float64}
+    Vm::Vector{Float64}
+    tau_shape::Float64
+    tau_scale::Vector{Float64}
 end
 
 function DesignA(input::GibbsInput; m_aux::Integer=2)
@@ -67,16 +81,18 @@ function DesignA(input::GibbsInput; m_aux::Integer=2)
     X, W = input.data.X, input.data.W
     pb = input.priors.prior_theta.prior_beta
     ktot = kz + 2kx
+    hier = input.params.hierarchical
+    xi = findfirst(==("(Intercept)"), input.data.xnames)
+    zi = findfirst(==("(Intercept)"), input.data.znames)
+    (xi === nothing || zi === nothing) && (slopes == :common || hier) &&
+        throw(ArgumentError("slopes = :common and hierarchical = true need an intercept in both formulas"))
+    iall = xi === nothing || zi === nothing ? Int[] : [zi, kz + xi, kz + kx + xi]
     if slopes == :cluster
         cidx = collect(1:ktot)
         Wc, Xc = W, X
         Wg, Xg = zeros(n, 0), zeros(n, 0)
     elseif slopes == :common
-        xi = findfirst(==("(Intercept)"), input.data.xnames)
-        zi = findfirst(==("(Intercept)"), input.data.znames)
-        (xi === nothing || zi === nothing) &&
-            throw(ArgumentError("slopes = :common needs an intercept in both formulas"))
-        cidx = [zi, kz + xi, kz + kx + xi]
+        cidx = iall
         Wc, Xc = ones(n, 1), ones(n, 1)
         Wg, Xg = W[:, setdiff(1:kz, zi)], X[:, setdiff(1:kx, xi)]
     else
@@ -97,8 +113,95 @@ function DesignA(input::GibbsInput; m_aux::Integer=2)
         aux_mean[i] = unit_mean(Xc, Wc, mu_c, i)
         aux_cov[i] = Hc * Vc * Hc'
     end
+    ## hyperpriors from the fixed intercept prior: m ~ N(mu, V) and E[tau2] = V (IG(3, 2V)), so
+    ## with C3, V_m = diag(0.5^2, 1, 1) and s^2 = (0.5^2, 1, 1)
+    icidx = [findfirst(==(c), cidx) for c in iall]
+    Vint = Vc[icidx, icidx]
+    hier && maximum(abs, Vint - Diagonal(diag(Vint)); init=0.0) > 0 &&
+        throw(ArgumentError("hierarchical = true needs uncorrelated intercepts in the prior"))
+    if hier && slopes == :cluster
+        oth = setdiff(1:length(cidx), icidx)
+        maximum(abs, Vc[icidx, oth]; init=0.0) == 0 ||
+            throw(ArgumentError("hierarchical = true needs intercepts uncorrelated with the slopes in the prior"))
+    end
+    mu_m, Vm = mu_c[icidx], diag(Vint)
     return DesignA(slopes, cidx, gidx, Wc, Xc, Wg, Xg, mu_c, Vc, Vc_inv, Vc_inv * mu_c,
-                   cholesky(Symmetric(Vc)).L, mu_g, Vg_inv, Vg_inv * mu_g, aux_mean, aux_cov, m_aux)
+                   cholesky(Symmetric(Vc)).L, mu_g, Vg_inv, Vg_inv * mu_g, aux_mean, aux_cov, m_aux,
+                   hier, icidx, mu_m, Vm, 3.0, 2 .* Vm)
+end
+
+## S = H^c_i V H^c_i' (+ S0 when given), H^c_i = blockdiag(w_i', x_i', x_i'), no allocation
+function add_hvh!(S::Matrix{Float64}, V::AbstractMatrix{Float64}, Wc::AbstractMatrix{Float64},
+                  Xc::AbstractMatrix{Float64}, i::Integer, S0=nothing)
+    kz, kx = size(Wc, 2), size(Xc, 2)
+    @inbounds for ib in 1:3, ia in 1:ib
+        oa = ia == 1 ? 0 : (ia == 2 ? kz : kz + kx)
+        ob = ib == 1 ? 0 : (ib == 2 ? kz : kz + kx)
+        na = ia == 1 ? kz : kx
+        nb = ib == 1 ? kz : kx
+        acc = 0.0
+        for q in 1:nb
+            hq = ib == 1 ? Wc[i, q] : Xc[i, q]
+            t = 0.0
+            for p in 1:na
+                t += (ia == 1 ? Wc[i, p] : Xc[i, p]) * V[oa + p, ob + q]
+            end
+            acc += t * hq
+        end
+        S[ia, ib] = (S0 === nothing ? 0.0 : S0[ia, ib]) + acc
+        S[ib, ia] = S[ia, ib]
+    end
+    return S
+end
+
+## set the intercept block of the beta^c prior to (m, diag(tau2)) and refresh everything derived
+## from (mu_c, V_c): V_c^-1, V_c^-1 mu_c, the factor of V_c and the auxiliary predictives
+function set_cprior!(D::DesignA, m::AbstractVector{Float64}, tau2::AbstractVector{Float64})
+    ic = D.icidx
+    for (a, l) in enumerate(ic)
+        D.mu_c[l] = m[a]
+        for (b, l2) in enumerate(ic)
+            D.Vc[l, l2] = a == b ? tau2[a] : 0.0
+        end
+    end
+    copyto!(D.Vc_inv, Symmetric(inv(Symmetric(D.Vc))))
+    mul!(D.Vc_inv_mu, D.Vc_inv, D.mu_c)
+    copyto!(parent(D.Lc), Matrix(cholesky(Symmetric(D.Vc)).L))
+    for i in eachindex(D.aux_mean)
+        D.aux_mean[i] = unit_mean(D.Xc, D.Wc, D.mu_c, i)
+        add_hvh!(D.aux_cov[i], D.Vc, D.Wc, D.Xc, i)
+    end
+    return D
+end
+
+## the state's hyperparameters into D (initialized at the hyperprior means if unset)
+function sync_hyper!(state::GibbsState, D::DesignA)
+    D.hier || return D
+    h = state.state_hyper
+    if isempty(h.m)
+        h.m, h.tau2 = copy(D.mu_m), D.tau_scale ./ (D.tau_shape - 1)
+    end
+    return set_cprior!(D, h.m, h.tau2)
+end
+
+## (vii) hyperparameters of the hierarchical intercepts, given the k cluster intercepts a_j:
+##   m_l ~ N(P^-1 (mu_m,l / Vm_l + sum_j a_lj / tau2_l), P^-1),  P = 1/Vm_l + k/tau2_l,
+##   tau2_l ~ IG(tau_shape + k/2, tau_scale_l + sum_j (a_lj - m_l)^2 / 2)
+function update_hyper!(rng::AbstractRNG, state::GibbsState, D::DesignA)
+    h = state.state_hyper
+    pos = D.cidx[D.icidx]
+    occ = [j for j in eachindex(state.state_dp.njs) if state.state_dp.njs[j] > 0]
+    k = length(occ)
+    for l in 1:3
+        sa = sum(state.state_theta[j].beta[pos[l]] for j in occ)
+        P = 1 / D.Vm[l] + k / h.tau2[l]
+        h.m[l] = (D.mu_m[l] / D.Vm[l] + sa / h.tau2[l]) / P + randn(rng) / sqrt(P)
+    end
+    for l in 1:3
+        ss = sum((state.state_theta[j].beta[pos[l]] - h.m[l])^2 for j in occ)
+        h.tau2[l] = rand(rng, InverseGamma(D.tau_shape + k / 2, D.tau_scale[l] + ss / 2))
+    end
+    return set_cprior!(D, h.m, h.tau2)
 end
 
 ## the 3 x kc design blockdiag(w_i', x_i', x_i') for the rows of W and X
@@ -298,27 +401,8 @@ post_cache!(pc, st, D, Sinv) = post_m!(post_Q!(pc, st, D, Sinv), st, D, Sinv)
 ## the beta^c-collapsed predictive of z~_i for a cluster: mean H^c_i m and, into S,
 ## Sigma + H^c_i Q^-1 H^c_i', with H^c_i = blockdiag(w_i', x_i', x_i')
 function predictive!(S::Matrix{Float64}, pc::PostCache, Sigma::AbstractMatrix{Float64}, D::DesignA, i::Integer)
-    Wc, Xc = D.Wc, D.Xc
-    kz, kx = size(Wc, 2), size(Xc, 2)
-    V = pc.Qinv
-    @inbounds for ib in 1:3, ia in 1:ib
-        oa = ia == 1 ? 0 : (ia == 2 ? kz : kz + kx)
-        ob = ib == 1 ? 0 : (ib == 2 ? kz : kz + kx)
-        na = ia == 1 ? kz : kx
-        nb = ib == 1 ? kz : kx
-        acc = 0.0
-        for q in 1:nb
-            hq = ib == 1 ? Wc[i, q] : Xc[i, q]
-            t = 0.0
-            for p in 1:na
-                t += (ia == 1 ? Wc[i, p] : Xc[i, p]) * V[oa + p, ob + q]
-            end
-            acc += t * hq
-        end
-        S[ia, ib] = Sigma[ia, ib] + acc
-        S[ib, ia] = S[ia, ib]
-    end
-    return unit_mean(Xc, Wc, pc.m, i)
+    add_hvh!(S, pc.Qinv, D.Wc, D.Xc, i, Sigma)
+    return unit_mean(D.Xc, D.Wc, pc.m, i)
 end
 
 ## (i) labels. label_step = :r2 (default): the joint label-and-latent step R2, scoring the
@@ -506,6 +590,7 @@ end
 
 ## one Design A sweep, (i)-(vi); test = true keeps the latent data fixed
 function marginal_sweep!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, D::DesignA; test::Bool=false)
+    sync_hyper!(state, D)                                # the prior of beta^c from (m, tau2)
     ## (i) R2 by default; test = true keeps the latent data fixed, so it scores z~ instead
     update_marginal_labels!(rng, state, input, D; r2 = input.params.label_step == :r2 && !test)
     update_marginal_coefs!(rng, state, D)                # (ii)
@@ -524,6 +609,7 @@ function marginal_sweep!(rng::AbstractRNG, state::GibbsState, input::GibbsInput,
     if input.priors.prior_dp.alpha_shape != 0.0          # (vi)
         update_alpha!(rng, state, input)
     end
+    D.hier && update_hyper!(rng, state, D)               # (vii) m, tau2
     return state
 end
 
@@ -542,7 +628,7 @@ function dpm_marginal!(state::GibbsState, input::GibbsInput, out::GibbsOut; test
             @printf("\nIteration %d: J = %d, alpha = %f", m + state.state_sampler.batch_m,
                     state.state_dp.J, state.state_dp.alpha)
         end
-        out = update_out!(state, out, m)
+        out = update_out!(state, out, m, input)
     end
     if verbose @printf("\nSampler run complete.\n") end
     state = update_sampler!(state, M)
@@ -565,6 +651,9 @@ function rand_marginal(rng::AbstractRNG, out::GibbsOut, input::GibbsInput, hnew:
         if jm <= length(dp.njs)
             beta, Sigma = th[jm].beta, th[jm].Sigma
         else
+            if D.hier && length(out.out_hyper) >= m && !isempty(out.out_hyper[m])
+                set_cprior!(D, out.out_hyper[m][1:3], out.out_hyper[m][4:6])
+            end
             ## a new cluster: beta^c from its prior, the shared b from the draw, Sigma from G0
             beta = full_beta(D, D.mu_c + D.Lc * randn(rng, length(D.mu_c)), th[1].beta[D.gidx])
             Sigma = NobileWishart(rng, ps.rho, rhoR)
