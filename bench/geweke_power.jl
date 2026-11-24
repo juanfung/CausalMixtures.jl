@@ -1,11 +1,15 @@
 # bench/geweke_power.jl -- power check of the Geweke harness: plant one bug by redefining a
-# method, then run the Design A Geweke test (50k sweeps vs 100k forward draws) in both slope modes.
-#   julia --project=. bench/geweke_power.jl <bug>
-# bugs: none, sigma_dof, no_beta_unc, no_phi, no_shift, alpha_fixed_indicator
+# method, then run the Geweke test (50k sweeps vs 100k forward draws) for Design A in both slope
+# modes and for gaussian.
+#   julia --project=. bench/geweke_power.jl <bug> [M_sc] [M_mc]   (default 50000 100000)
+# bugs: none, sigma_dof, no_beta_unc, no_phi, no_shift, alpha_fixed_indicator (Phases 4a-4b);
+# r3_posterior, r3_no_redraw, r3_no_redraw_dfirst, r3_dfirst, r3_scale_R, r3_dof (Phase 4c, R3)
 include(joinpath(@__DIR__, "..", "test", "GewekeHarness.jl")); using .GewekeHarness
 using CausalMixtures, Random, LinearAlgebra
 const CM = CausalMixtures
 bug = ARGS[1]
+M_sc = length(ARGS) > 1 ? parse(Int, ARGS[2]) : 50_000
+M_mc = length(ARGS) > 2 ? parse(Int, ARGS[3]) : 100_000
 if bug == "sigma_dof"      # Sigma_j ~ NobileWishart(rho + n_j + 1, ...)
     @eval CM function update_marginal_sigmas!(rng::AbstractRNG, state::GibbsState, input::GibbsInput)
         ps = input.priors.prior_theta.prior_Sigma
@@ -58,7 +62,64 @@ elseif bug == "no_shift"  # R2 with the plan's original cut-off at 0: the global
         ym = mu[mi] + k1 * (ds - mu[1]) + k2 * (yo - mu[o]) + sqrt(max(S[mi, mi] - k1 * c1 - k2 * c2, 0.0)) * randn(rng)
         return d == 1 ? (ds, Float64(yo), ym) : (ds, ym, Float64(yo))
     end
-elseif bug == "alpha_fixed_indicator"  # Escobar-West always with shape a + k (Phase 1 bug 3)
+elseif bug == "r3_posterior"  # R3 with the posterior (rho + n_j, rho R + sum e e') instead of the prior
+    @eval CM function update_sigma23!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, j::Integer, idx::AbstractVector{<:Integer})
+        ps = input.priors.prior_theta.prior_Sigma
+        th = state.state_theta[j]
+        X, W = input.data.X, input.data.W
+        sd = state.state_data
+        U = ps.rho .* ps.R
+        for i in idx
+            md, m1, m0 = unit_mean(X, W, th.beta, i)
+            e = (sd.dstar[i] - md, sd.y1[i] - m1, sd.y0[i] - m0)
+            for a in 1:3, c in 1:3
+                U[a, c] += e[a] * e[c]
+            end
+        end
+        S = copy(th.Sigma)
+        S[2, 3] = S[3, 2] = slice_sigma23(rng, S, U, ps.rho + length(idx))
+        state.state_theta[j] = Theta(beta=th.beta, Sigma=S)
+        return update_ymiss_only!(rng, state, input, j, idx)
+    end
+elseif bug in ("r3_scale_R", "r3_dof")  # R3 with a wrong prior target: scale R (rho dropped), or rho + 6 dof
+    @eval CM function update_sigma23!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, j::Integer, idx::AbstractVector{<:Integer})
+        ps = input.priors.prior_theta.prior_Sigma
+        th = state.state_theta[j]
+        S = copy(th.Sigma)
+        V, nu = $(bug == "r3_scale_R") ? (ps.R, ps.rho) : (ps.rho .* ps.R, ps.rho + 6)
+        S[2, 3] = S[3, 2] = slice_sigma23(rng, S, V, nu)
+        state.state_theta[j] = Theta(beta=th.beta, Sigma=S)
+        return update_ymiss_only!(rng, state, input, j, idx)
+    end
+elseif bug in ("r3_no_redraw", "r3_no_redraw_dfirst")  # R3 without the y_miss redraw
+    @eval CM function update_sigma23!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, j::Integer, idx::AbstractVector{<:Integer})
+        ps = input.priors.prior_theta.prior_Sigma
+        th = state.state_theta[j]
+        S = copy(th.Sigma)
+        S[2, 3] = S[3, 2] = slice_sigma23(rng, S, ps.rho .* ps.R, ps.rho)
+        state.state_theta[j] = Theta(beta=th.beta, Sigma=S)
+        return state
+    end
+end
+if bug in ("r3_no_redraw_dfirst", "r3_dfirst")  # latent refresh draws d* before y_miss
+    @eval CM function update_latent!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, j::Integer, idx::AbstractVector{<:Integer})
+        th = state.state_theta[j]
+        lm = LatentMoments(th.Sigma)
+        sdd = sqrt(lm.omega_d)
+        X, W = input.data.X, input.data.W
+        y, d = input.data.y.a, input.data.d
+        lower, upper = input.data.lower, input.data.upper
+        sd = state.state_data
+        @inbounds for i in idx
+            md, m1, m0 = unit_mean(X, W, th.beta, i)
+            mu_d = md + (sd.y1[i] - m1) * lm.sd1 + (sd.y0[i] - m0) * lm.sd0
+            sd.dstar[i] = rand(rng, truncated(Normal(mu_d, sdd), lower[i], upper[i]))
+            sd.y1[i], sd.y0[i] = draw_ymiss(rng, lm, md, m1, m0, sd.dstar[i], y[i], d[i])
+        end
+        return state
+    end
+end
+if bug == "alpha_fixed_indicator"  # Escobar-West always with shape a + k (Phase 1 bug 3)
     @eval CM function update_alpha!(rng::AbstractRNG, state::GibbsState, input::GibbsInput)
         state.state_dp.eta = rand(rng, Distributions.Beta(state.state_dp.alpha + 1, input.dims.n))
         b_star = input.priors.prior_dp.alpha_rate - log(state.state_dp.eta)
@@ -67,8 +128,8 @@ elseif bug == "alpha_fixed_indicator"  # Escobar-West always with shape a + k (P
         return state
     end
 end
-for s in (:common, :cluster)
-    r = geweke_run("marginal", s; M_sc=50_000, M_mc=100_000)
+for (model, s) in (("marginal", :common), ("marginal", :cluster), ("gaussian", :cluster))
+    r = geweke_run(model, s; M_sc=M_sc, M_mc=M_mc)
     worst = sort(r.rows, by = x -> -abs(x.z))[1:3]
-    println(bug, " ", s, " max|z| = ", round(r.maxz, digits=1), "  worst: ", join(["$(x.stat) $(round(x.z, digits=1))" for x in worst], ", "))
+    println(bug, " ", model == "gaussian" ? "gaussian" : s, " max|z| = ", round(r.maxz, digits=1), "  worst: ", join(["$(x.stat) $(round(x.z, digits=1))" for x in worst], ", "))
 end
