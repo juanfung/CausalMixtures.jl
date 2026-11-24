@@ -14,7 +14,11 @@ module GewekeHarness
 using CausalMixtures, Random, Statistics, LinearAlgebra, Distributions
 const CM = CausalMixtures
 
-export geweke_run, geweke_table
+export geweke_run, geweke_table, HIER
+
+## hierarchical intercepts in the marginal sampler (Phase 4d default); set HIER[] = false for
+## the fixed-prior sampler
+const HIER = Ref(true)
 
 ## the model's prior as a PriorSpec (C3; shared outcome slopes N(0, 1) under :common)
 function harness_spec(model::String, slopes::Symbol)
@@ -24,14 +28,15 @@ function harness_spec(model::String, slopes::Symbol)
     end
     return PriorSpec(slopes=slopes, sd_intercept=1, sd_intercept_d=0.5, sd_probit=0.5,
                      sd_outcome = slopes == :common ? 1.0 : 0.5, rho=10, r=0.153,
-                     alpha_shape=2.0, alpha_rate=2.0)
+                     alpha_shape=2.0, alpha_rate=2.0, hierarchical = model == "marginal" && HIER[])
 end
 
 ## sampler input for n units with the standardized covariates of generate_hedonic_data(n, seed)
 function harness_input(model::String, slopes::Symbol; n::Int=20, seed::Int=1, J::Int=10)
     data = generate_hedonic_data(n, seed)
     raw = CM.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
-    params = CM.InputParams(M=1, scale_data=(true, true), verbose=false, model=model, slopes=slopes)
+    params = CM.InputParams(M=1, scale_data=(true, true), verbose=false, model=model, slopes=slopes,
+                            hierarchical = model == "marginal" && HIER[])
     pr = setup_default_priors(2, 3; J = model == "gaussian" ? 1 : J,
                               slopes = model == "marginal" ? slopes : :cluster)
     state, input, _ = CM.dpm_init(raw, pr, params; rng=Xoshiro(seed))
@@ -55,12 +60,15 @@ function stat_names(model, slopes, input)
     if slopes == :common && model == "marginal"
         append!(nm, ["b$(j)" for j in eachindex(slope_idx(input))])
     end
+    if model == "marginal" && HIER[]
+        append!(nm, ["m_d", "m_1", "m_0", "log tau2_d", "log tau2_1", "log tau2_0"])
+    end
     push!(nm, "mean(a1 - a0)")
     model == "gaussian" || push!(nm, "share(c_1)")
     return nm
 end
 
-function stats_from(model, slopes, input, alpha, labels, njs, betas, Sigmas)
+function stats_from(model, slopes, input, alpha, labels, njs, betas, Sigmas, hyper=Float64[])
     n = length(labels)
     i_d, i_1, i_0 = intercepts(input)
     c1 = labels[1]
@@ -70,6 +78,9 @@ function stats_from(model, slopes, input, alpha, labels, njs, betas, Sigmas)
     append!(v, collect(sigma_entries(Sigmas[c1])))
     if slopes == :common && model == "marginal"
         append!(v, betas[c1][slope_idx(input)])
+    end
+    if model == "marginal" && HIER[]
+        append!(v, hyper[1:3], log.(hyper[4:6]))
     end
     push!(v, mean(betas[labels[i]][i_1] - betas[labels[i]][i_0] for i in 1:n))
     model == "gaussian" || push!(v, njs[c1] / n)
@@ -81,7 +92,7 @@ function forward_stats(rng, model, slopes, input, spec, J)
     X, W = input.data.X, input.data.W
     r = prior_draw(spec, X, W; rng=rng, partition = model == "blocked" ? :stick : :crp, J=J)
     betas = [vcat(r.gam[j], r.b1[j], r.b0[j]) for j in eachindex(r.counts)]
-    return stats_from(model, slopes, input, r.alpha, r.labels, r.counts, betas, r.Sigma), r
+    return stats_from(model, slopes, input, r.alpha, r.labels, r.counts, betas, r.Sigma, vcat(r.m, r.tau2)), r
 end
 
 ## put a forward draw into the sampler state and the data into the input
@@ -100,6 +111,7 @@ function load_draw!(rng, state, input, r, model)
         dp.J = K
     end
     CM.rebuild_members!(dp)
+    state.state_hyper = CM.StateHyper(m=copy(r.m), tau2=copy(r.tau2))
     set_data!(input, state, r.z)
     return state
 end
@@ -171,7 +183,8 @@ function geweke_run(model::String, slopes::Symbol=:cluster; M_sc::Int=100_000, M
         sweep!(rng, state, input, model, D)
         dp = state.state_dp
         G_sc[m, :] = stats_from(model, slopes, input, dp.alpha, dp.labels, dp.njs,
-                                [t.beta for t in state.state_theta], [t.Sigma for t in state.state_theta])
+                                [t.beta for t in state.state_theta], [t.Sigma for t in state.state_theta],
+                                vcat(state.state_hyper.m, state.state_hyper.tau2))
     end
     ## z-scores for g and g^2 (k and share: their own squares are informative too)
     rows = NamedTuple[]

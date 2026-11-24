@@ -21,6 +21,8 @@ A candidate base measure G0 and DP prior on the standardized scale. Intercepts, 
 and outcome slopes are independent N(0, sd^2); the selection-equation intercept has sd
 `sd_intercept_d` and the two outcome intercepts `sd_intercept`. Sigma ~ NobileWishart(rho, rho*R). alpha is fixed
 at `alpha` when `alpha_shape == 0`, and otherwise alpha ~ Gamma(alpha_shape, rate = alpha_rate).
+`hierarchical = true` (Phase 4d): the cluster intercepts a_j = (a_d, a_1, a_0) ~ N(m, diag(tau2)) with
+m ~ N(0, diag(v)) and tau2_l ~ IG(3, 2 v_l), v = (sd_intercept_d^2, sd_intercept^2, sd_intercept^2).
 """
 struct PriorSpec
     name::String
@@ -34,15 +36,16 @@ struct PriorSpec
     alpha::Float64
     alpha_shape::Float64
     alpha_rate::Float64
+    hierarchical::Bool
 end
 
 function PriorSpec(; name::String="", slopes::Symbol=:cluster, sd_intercept::Real=1.0,
                    sd_intercept_d::Real=sd_intercept, sd_probit::Real=1.0, sd_outcome::Real=1.0, rho::Integer=6, r::Real=2.0,
                    R::AbstractMatrix=Matrix(Diagonal([1/rho, r, r])), alpha::Real=1.0,
-                   alpha_shape::Real=0.0, alpha_rate::Real=0.0)
+                   alpha_shape::Real=0.0, alpha_rate::Real=0.0, hierarchical::Bool=false)
     slopes in (:cluster, :common) || throw(ArgumentError("slopes must be :cluster or :common"))
     return PriorSpec(name, slopes, sd_intercept, sd_intercept_d, sd_probit, sd_outcome, rho, Matrix{Float64}(R),
-                     alpha, alpha_shape, alpha_rate)
+                     alpha, alpha_shape, alpha_rate, hierarchical)
 end
 
 ## copy of a spec with some fields changed
@@ -50,7 +53,7 @@ function PriorSpec(s::PriorSpec; kw...)
     f = merge((name=s.name, slopes=s.slopes, sd_intercept=s.sd_intercept,
                sd_intercept_d=s.sd_intercept_d, sd_probit=s.sd_probit,
                sd_outcome=s.sd_outcome, rho=s.rho, R=s.R, alpha=s.alpha,
-               alpha_shape=s.alpha_shape, alpha_rate=s.alpha_rate), values(kw))
+               alpha_shape=s.alpha_shape, alpha_rate=s.alpha_rate, hierarchical=s.hierarchical), values(kw))
     return PriorSpec(; f...)
 end
 
@@ -137,6 +140,14 @@ function prior_draw(s::PriorSpec, X::AbstractMatrix, W::AbstractMatrix;
         throw(ArgumentError("partition must be :crp or :stick"))
     end
     K = length(counts)
+    ## hierarchical intercepts: (m, tau2) once per draw
+    vint = [s.sd_intercept_d, s.sd_intercept, s.sd_intercept] .^ 2
+    if s.hierarchical
+        m = sqrt.(vint) .* randn(rng, 3)
+        tau2 = [rand(rng, InverseGamma(3.0, 2v)) for v in vint]
+    else
+        m, tau2 = zeros(3), vint
+    end
     ## shared slopes for :common (drawn in both modes, to keep one random stream)
     g_sl, b1_sl, b0_sl = slopes(s.sd_probit, kw - 1), slopes(s.sd_outcome, kx - 1), slopes(s.sd_outcome, kx - 1)
     shared = s.slopes == :common ? (copy(g_sl), copy(b1_sl), copy(b0_sl)) : (Float64[], Float64[], Float64[])
@@ -146,7 +157,7 @@ function prior_draw(s::PriorSpec, X::AbstractMatrix, W::AbstractMatrix;
     Sigma = Vector{Matrix{Float64}}(undef, K)
     L = Vector{Matrix{Float64}}(undef, K)
     for j in 1:K
-        a = [s.sd_intercept_d, s.sd_intercept, s.sd_intercept] .* randn(rng, 3)
+        a = m .+ sqrt.(tau2) .* randn(rng, 3)
         if s.slopes == :cluster
             g_sl, b1_sl, b0_sl = slopes(s.sd_probit, kw - 1), slopes(s.sd_outcome, kx - 1), slopes(s.sd_outcome, kx - 1)
         end
@@ -166,7 +177,7 @@ function prior_draw(s::PriorSpec, X::AbstractMatrix, W::AbstractMatrix;
     d = Int.(z[:, 1] .> 0)
     y = ifelse.(d .== 1, z[:, 2], z[:, 3])
     return (alpha=alpha, labels=labels, counts=counts, gam=gam, b1=b1, b0=b0, Sigma=Sigma,
-            slopes=shared, z=z, d=d, y=y)
+            slopes=shared, z=z, d=d, y=y, m = s.hierarchical ? m : Float64[], tau2 = s.hierarchical ? tau2 : Float64[])
 end
 
 """
