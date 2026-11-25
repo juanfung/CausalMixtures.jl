@@ -5,7 +5,11 @@ isdefined(Main, :TestHelpers) || include("TestHelpers.jl")
 using .TestHelpers
 
 @testset "Default priors are C3" begin
+    ## the default slope mode is :common, as in InputParams: shared outcome slopes N(0, 1)
     pr = CausalMixtures.setup_default_priors(2, 3)
+    @test pr.slopes == :common == CausalMixtures.InputParams().slopes
+    @test pr.prior_theta.prior_beta.Vcov ≈ Diagonal([0.5^2, 0.5^2, 0.5^2, 1.0, 1.0, 1.0, 1.0])
+    pr = CausalMixtures.setup_default_priors(2, 3; slopes=:cluster)
     pb, ps, pd = pr.prior_theta.prior_beta, pr.prior_theta.prior_Sigma, pr.prior_dp
     ## beta = (gamma (kz = 3), beta1 (kx = 2), beta0 (kx = 2)), intercepts first in each block
     @test pb.mu == zeros(7)
@@ -20,7 +24,7 @@ using .TestHelpers
     c3 = PriorSpec(name="C3", sd_intercept=1, sd_intercept_d=0.5, sd_probit=0.5, sd_outcome=0.5,
                    rho=10, r=0.153, alpha_shape=2.0, alpha_rate=2.0)
     for (kx, kz) in ((1, 1), (2, 3), (4, 2))
-        p = CausalMixtures.setup_default_priors(kx, kz)
+        p = CausalMixtures.setup_default_priors(kx, kz; slopes=:cluster)
         @test diag(p.prior_theta.prior_beta.Vcov) ≈ g0_V0(c3, kx, kz)
         @test p.prior_theta.prior_Sigma.R ≈ c3.R
     end
@@ -32,9 +36,9 @@ using .TestHelpers
     @test p.prior_theta.prior_Sigma.R ≈ Diagonal([1/6, 0.13, 0.13])
 
     ## intercept positions: none, or not in column 1
-    p = CausalMixtures.setup_default_priors(2, 3; xintercept=nothing, zintercept=2)
+    p = CausalMixtures.setup_default_priors(2, 3; xintercept=nothing, zintercept=2, slopes=:cluster)
     @test diag(p.prior_theta.prior_beta.Vcov) ≈ [0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25]
-    p = CausalMixtures.setup_default_priors(2, 3; xintercept=2, zintercept=3, sd_probit=1.0)
+    p = CausalMixtures.setup_default_priors(2, 3; xintercept=2, zintercept=3, sd_probit=1.0, slopes=:cluster)
     @test diag(p.prior_theta.prior_beta.Vcov) ≈ [1.0, 1.0, 0.25, 0.25, 1.0, 0.25, 1.0]
     @test_throws ArgumentError CausalMixtures.setup_default_priors(2, 3; zintercept=4)
     @test_throws ArgumentError CausalMixtures.setup_default_priors(0, 3)
@@ -48,7 +52,7 @@ end
           CausalMixtures.setup_default_priors(2, 3).prior_theta.prior_beta.Vcov
     ## no intercept in the selection equation
     raw0 = CausalMixtures.RawData(@formula(Y_obs ~ X), @formula(D_obs ~ 0 + X + Z), df)
-    p0 = CausalMixtures.setup_default_priors(raw0)
+    p0 = CausalMixtures.setup_default_priors(raw0; slopes=:cluster)
     @test diag(p0.prior_theta.prior_beta.Vcov) ≈ [0.25, 0.25, 1.0, 0.25, 1.0, 0.25]
     ## a one-term formula
     raw1 = CausalMixtures.RawData(@formula(Y_obs ~ 1), @formula(D_obs ~ Z), df)

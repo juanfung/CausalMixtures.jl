@@ -130,7 +130,7 @@ end
 
 """
     setup_default_priors(kx, kz; J=20, alpha=1.0, alpha_shape=2.0, alpha_rate=2.0,
-                         sd_intercept=1.0, sd_intercept_d=0.5, sd_probit=0.5, slopes=:cluster,
+                         sd_intercept=1.0, sd_intercept_d=0.5, sd_probit=0.5, slopes=:common,
                          sd_outcome = slopes == :common ? 1.0 : 0.5, rho=10, r=0.153,
                          xintercept=1, zintercept=1)
     setup_default_priors(raw::RawData; kwargs...)
@@ -156,9 +156,9 @@ give the position of the intercept column in each equation (`nothing` if there i
 `RawData` method reads them from the formulas. Set `alpha_shape = 0` to fix alpha at `alpha`.
 `J` is the truncation level for `blocked` and `fmn`, and the initial number of components for
 `dpm` and `marginal`. `slopes` is the slope mode of the Design A sampler (`model = "marginal"`,
-`InputParams(slopes = ...)`, default `:common` there); it sets the outcome-slope default and is
-recorded in the priors so that `dpm_init` can warn about a mismatch. Use `slopes = :common` with
-`model = "marginal"` and its default slope mode.
+`InputParams(slopes = ...)`); both default to `:common`. It sets the outcome-slope default and is
+recorded in the priors so that `dpm_init` can warn about a mismatch. Pass `slopes = :cluster` for
+per-cluster slopes (outcome slope sd 0.5), with `InputParams(slopes = :cluster)` for `marginal`.
 
 The calibration, its targets and the comparison with the other candidates are in
 `docs/priors.md`.
@@ -171,7 +171,7 @@ function setup_default_priors(kx::Integer, kz::Integer;
                               sd_intercept::Real = 1.0,
                               sd_intercept_d::Real = 0.5,
                               sd_probit::Real = 0.5,
-                              slopes::Symbol = :cluster,
+                              slopes::Symbol = :common,
                               sd_outcome::Real = slopes == :common ? 1.0 : 0.5,
                               rho::Integer = 10,
                               r::Real = 0.153,
