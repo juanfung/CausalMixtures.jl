@@ -1,214 +1,50 @@
-# test/integration/test_hedonic_model.jl
+# test/integration/test_hedonic_model.jl -- recovery tests (Phase 6a), replacing the old 30-50
+# iteration integration runs. Fixed seeds; simulate_selection(...; diagnostic = true) data.
+# Default suite (about 1.5 minutes): gaussian to an ATE ESS of about 200, and a shorter
+# marginal :common check. CM_LONG=1 adds the full marginal :common recovery (4 chains x 10k at
+# n = 2000, ATE ESS about 200; 5-12 minutes depending on load).
+using CausalMixtures, Test, Statistics, Random
+const CMI = CausalMixtures
 
-using CausalMixtures
-using Test, Statistics, Random
+const LONG_RECOVERY = get(ENV, "CM_LONG", "0") == "1"
 
-@testset "Hedonic Model Integration Tests" begin
-    
-    @testset "Data Generation" begin
-        @test_nowarn data = CausalMixtures.generate_hedonic_data(100, 2099)
-        
-        data = CausalMixtures.generate_hedonic_data(100, 2099)
-        
-        # Basic data structure tests
-        @test size(data.df, 1) == 100
-        @test "Y_obs" in names(data.df)
-        @test "D_obs" in names(data.df)
-        @test "X" in names(data.df)
-        @test "Z" in names(data.df)
-        
-        @test abs(data.true_effects.ate) < 20
-        @test data.design_info.n == 100
+function recover(model, n, M; chains=4, seed=2026, scenario=:gaussian)
+    s = simulate_selection(n; scenario=scenario, diagnostic=true, rng=Xoshiro(seed))
+    raw = CMI.RawData(s.formulas.formula_y, s.formulas.formula_d, s.df)
+    pr = setup_default_priors(raw; J = model == "gaussian" ? 1 : 20)
+    effs = map(1:chains) do c
+        p = CMI.InputParams(M=M, thin = max(1, M ÷ 5000), scale_data=(true, true), verbose=false, model=model)
+        rng = Xoshiro(seed + 100c)
+        _, input, out = CMI.dpm!(CMI.dpm_init(raw, pr, p; rng=rng)...; rng=rng)
+        CMI.effects(out, input; rng=rng, burn = length(out.out_dp) ÷ 4)
+    end
+    return CMI.effects_summary(effs), s.truth.population
+end
+
+@testset "Recovery tests" begin
+    @testset "legacy generate_hedonic_data still works" begin
+        data = CMI.generate_hedonic_data(100, 2099)
+        @test size(data.df, 1) == 100 && all(in(names(data.df)), ["Y_obs", "D_obs", "X", "Z"])
         @test data.design_info.n_treated + data.design_info.n_control == 100
     end
-    
-    @testset "Blocked Sampler Integration" begin
-        # Test blocked sampler specifically
-        data_test = CausalMixtures.generate_hedonic_data(200, 1234)
-        priors_test = CausalMixtures.setup_default_priors(2, 3)
-        raw_data_test = CausalMixtures.RawData(data_test.formulas.formula_y, 
-                                             data_test.formulas.formula_d, data_test.df)
-        
-        params_test = CausalMixtures.InputParams(M=50, scale_data=(true,true), 
-                                               verbose=false, model="blocked")
-        
-        @test_nowarn jit_init_test = CausalMixtures.dpm_init(raw_data_test, priors_test, params_test)
-        
-        jit_init_fresh = CausalMixtures.dpm_init(raw_data_test, priors_test, params_test)
-        out_test = nothing
-        @test_nowarn out_test = CausalMixtures.dpm!(jit_init_fresh...)
-        
-        state_test, input_test, output_test = out_test
-        @test length(output_test.out_dp) == 50
-        @test length(output_test.out_theta) == 50
-        
-        # Test PPD computation
-        znew_test = CausalMixtures.mean_covariates(input_test)  # (xbar, wbar) over all n
-        ynew_test = nothing
-        @test_nowarn ynew_test = CausalMixtures.rand_ppd(output_test, input_test, znew_test...)
-        
-        tes_test = nothing
-        @test_nowarn tes_test = CausalMixtures.dpm_ate(ynew_test, input_test)
-        
-        # Test treatment effects are reasonable
-        @test length(tes_test.ate) == 50
-        @test abs(mean(tes_test.ate) - data_test.true_effects.ate) < 8.0
-        @test !any(isnan.(tes_test.ate))
-        @test !any(isinf.(tes_test.ate))
-        
-        println("blocked sampler ATE: $(round(mean(tes_test.ate), digits=3))")
+    @testset "gaussian recovers the population PATE (n = 2000)" begin
+        e, pop = recover("gaussian", 2000, 25_000)
+        @test e.pate.q[1] < pop.pate < e.pate.q[3]
+        @test e.pate.rhat < 1.05 || e.pate.rhat
+        @test e.pate.ess_bulk > 150 || e.pate.ess_bulk
     end
-    
-    @testset "DPM Sampler Integration" begin
-        # Test dpm sampler specifically  
-        data_test2 = CausalMixtures.generate_hedonic_data(200, 5678)
-        priors_test2 = CausalMixtures.setup_default_priors(2, 3)
-        raw_data_test2 = CausalMixtures.RawData(data_test2.formulas.formula_y, 
-                                              data_test2.formulas.formula_d, data_test2.df)
-        
-        params_test2 = CausalMixtures.InputParams(M=50, scale_data=(true,true), 
-                                                verbose=false, model="dpm")
-        
-        @test_nowarn jit_init_test2 = CausalMixtures.dpm_init(raw_data_test2, priors_test2, params_test2)
-        
-        jit_init_fresh2 = CausalMixtures.dpm_init(raw_data_test2, priors_test2, params_test2)
-        out_test2 = nothing
-        @test_nowarn out_test2 = CausalMixtures.dpm!(jit_init_fresh2...)
-        
-        state_test2, input_test2, output_test2 = out_test2
-        @test length(output_test2.out_dp) == 50
-        @test length(output_test2.out_theta) == 50
-        
-        # Test PPD computation
-        znew_test2 = CausalMixtures.mean_covariates(input_test2)  # (xbar, wbar) over all n
-        ynew_test2 = nothing
-        @test_nowarn ynew_test2 = CausalMixtures.rand_ppd(output_test2, input_test2, znew_test2...)
-        
-        tes_test2 = nothing
-        @test_nowarn tes_test2 = CausalMixtures.dpm_ate(ynew_test2, input_test2)
-        
-        # Test treatment effects are reasonable
-        @test length(tes_test2.ate) == 50
-        @test abs(mean(tes_test2.ate) - data_test2.true_effects.ate) < 8.0
-        @test !any(isnan.(tes_test2.ate))
-        @test !any(isinf.(tes_test2.ate))
-        
-        println("dpm sampler ATE: $(round(mean(tes_test2.ate), digits=3))")
+    @testset "marginal :common: PATE interval covers the population truth (n = 1000)" begin
+        e, pop = recover("marginal", 1000, 3000)
+        @test e.pate.q[1] < pop.pate < e.pate.q[3]
+        @test e.pate.rhat < 1.1 || e.pate.rhat
+        @test abs(e.pate.mean - pop.pate) < 0.1           # diagnostic effects are 0.5 log points
     end
-    
-    @testset "FMN Sampler Integration" begin
-        # Test fmn sampler specifically  
-        data_test3 = CausalMixtures.generate_hedonic_data(200, 9999)
-        priors_test3 = CausalMixtures.setup_default_priors(2, 3)
-        raw_data_test3 = CausalMixtures.RawData(data_test3.formulas.formula_y, 
-                                              data_test3.formulas.formula_d, data_test3.df)
-        
-        params_test3 = CausalMixtures.InputParams(M=50, scale_data=(true,true), 
-                                                verbose=false, model="fmn")
-        
-        @test_nowarn jit_init_test3 = CausalMixtures.dpm_init(raw_data_test3, priors_test3, params_test3)
-        
-        jit_init_fresh3 = CausalMixtures.dpm_init(raw_data_test3, priors_test3, params_test3)
-        out_test3 = nothing
-        @test_nowarn out_test3 = CausalMixtures.dpm!(jit_init_fresh3...)
-        
-        state_test3, input_test3, output_test3 = out_test3
-        @test length(output_test3.out_dp) == 50
-        @test length(output_test3.out_theta) == 50
-        
-        # Test PPD computation
-        znew_test3 = CausalMixtures.mean_covariates(input_test3)  # (xbar, wbar) over all n
-        ynew_test3 = nothing
-        @test_nowarn ynew_test3 = CausalMixtures.rand_ppd(output_test3, input_test3, znew_test3...)
-        
-        tes_test3 = nothing
-        @test_nowarn tes_test3 = CausalMixtures.dpm_ate(ynew_test3, input_test3)
-        
-        # Test treatment effects are reasonable
-        @test length(tes_test3.ate) == 50
-        @test abs(mean(tes_test3.ate) - data_test3.true_effects.ate) < 8.0
-        @test !any(isnan.(tes_test3.ate))
-        @test !any(isinf.(tes_test3.ate))
-        
-        println("fmn sampler ATE: $(round(mean(tes_test3.ate), digits=3))")
-    end
-    
-    @testset "Gaussian Sampler Integration" begin
-        # Test gaussian sampler specifically  
-        data_test4 = CausalMixtures.generate_hedonic_data(200, 7777)
-        ## SET J = 1 manually!
-        priors_test4 = CausalMixtures.setup_default_priors(2, 3, J=1)
-        raw_data_test4 = CausalMixtures.RawData(data_test4.formulas.formula_y, 
-                                                data_test4.formulas.formula_d, data_test4.df)
-        params_test4 = CausalMixtures.InputParams(M=50, scale_data=(true,true), 
-                                                  verbose=false, model="gaussian")
-        
-        @test_nowarn jit_init_test4 = CausalMixtures.dpm_init(raw_data_test4, priors_test4, params_test4)
-        
-        jit_init_fresh4 = CausalMixtures.dpm_init(raw_data_test4, priors_test4, params_test4)
-        out_test4 = nothing
-        @test_nowarn out_test4 = CausalMixtures.dpm!(jit_init_fresh4...)
-        
-        state_test4, input_test4, output_test4 = out_test4
-        @test length(output_test4.out_dp) == 50
-        @test length(output_test4.out_theta) == 50
-        
-        # Test PPD computation
-        znew_test4 = CausalMixtures.mean_covariates(input_test4)  # (xbar, wbar) over all n
-        ynew_test4 = nothing
-        @test_nowarn ynew_test4 = CausalMixtures.rand_ppd(output_test4, input_test4, znew_test4...)
-        
-        tes_test4 = nothing
-        @test_nowarn tes_test4 = CausalMixtures.dpm_ate(ynew_test4, input_test4)
-        
-        # Test treatment effects are reasonable
-        @test length(tes_test4.ate) == 50
-        @test abs(mean(tes_test4.ate) - data_test4.true_effects.ate) < 8.0
-        @test !any(isnan.(tes_test4.ate))
-        @test !any(isinf.(tes_test4.ate))
-        
-        println("gaussian sampler ATE: $(round(mean(tes_test4.ate), digits=3))")
-    end
-    
-    @testset "Multi-Sampler Consistency Comparison" begin
-        # Compare all working samplers on same data
-        data_comp = CausalMixtures.generate_hedonic_data(150, 42)
-        priors_comp = CausalMixtures.setup_default_priors(2, 3)
-        raw_data_comp = CausalMixtures.RawData(data_comp.formulas.formula_y, 
-                                             data_comp.formulas.formula_d, data_comp.df)
-        
-        # Test all four working samplers
-        samplers = ["blocked", "dpm", "fmn", "gaussian"]
-        results = Dict()
-        
-        for sampler in samplers
-            if sampler == "gaussian"
-                priors_sampler = CausalMixtures.setup_default_priors(2, 3, J=1)
-            else
-                priors_sampler = priors_comp
-            end
-            params = CausalMixtures.InputParams(M=30, verbose=false, model=sampler)
-            init = CausalMixtures.dpm_init(raw_data_comp, priors_sampler, params)
-            out = CausalMixtures.dpm!(init...)
-            
-            # Compute treatment effects
-            znew_comp = CausalMixtures.mean_covariates(out[2])  # (xbar, wbar) over all n
-            ynew = CausalMixtures.rand_ppd(out[3], out[2], znew_comp...)
-            tes = CausalMixtures.dpm_ate(ynew, out[2])
-            
-            results[sampler] = mean(tes.ate)
-            
-            # Test each sampler gives reasonable results
-            @test abs(results[sampler] - data_comp.true_effects.ate) < 6.0
-        end
-        
-        # Test that all samplers are somewhat consistent with each other
-        ate_values = collect(values(results))
-        @test maximum(ate_values) - minimum(ate_values) < 8.0  # Range shouldn't be too wide
-        
-        println("Sampler ATE comparison:")
-        for (sampler, ate) in results
-            println("  $(sampler): $(round(ate, digits=3))")
+    if LONG_RECOVERY
+        @testset "marginal :common full recovery (CM_LONG=1; n = 2000, 4 x 10k)" begin
+            e, pop = recover("marginal", 2000, 10_000)
+            @test e.pate.q[1] < pop.pate < e.pate.q[3]
+            @test e.pate.rhat < 1.05 || e.pate.rhat
+            @test e.pate.ess_bulk > 150 || e.pate.ess_bulk
         end
     end
 end
