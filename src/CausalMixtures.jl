@@ -74,6 +74,6 @@ include("prior_predictive.jl")
 ## simulation utilities
 include("simulation_utils.jl")
 include("simulate_selection.jl")
-export generate_hedonic_data, setup_default_priors
+export generate_hedonic_data, setup_default_priors, auto_sigma_scale
 
 end

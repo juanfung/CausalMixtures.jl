@@ -135,7 +135,7 @@ end
                          sd_intercept=1.0, sd_intercept_d=0.5, sd_probit=0.5, slopes=:common,
                          sd_outcome = slopes == :common ? 1.0 : 0.5, rho=10, r=0.153,
                          xintercept=1, zintercept=1)
-    setup_default_priors(raw::RawData; kwargs...)
+    setup_default_priors(raw::RawData; r = 0.153, kwargs...)   # r = :auto: data-adaptive Sigma scale
 
 Default priors (candidate C3 of `docs/priors.md`) for a model with `kx` outcome-equation columns
 and `kz` selection-equation columns. The coefficient vector is `beta = (gamma, beta1, beta0)`,
@@ -159,7 +159,12 @@ give the position of the intercept column in each equation (`nothing` if there i
 `J` is the truncation level for `blocked` and `fmn`, and the initial number of components for
 `dpm` and `marginal`. `slopes` is the slope mode of the Design A sampler (`model = "marginal"`,
 `InputParams(slopes = ...)`); both default to `:common`. It sets the outcome-slope default and is
-recorded in the priors so that `dpm_init` can warn about a mismatch. Pass `slopes = :cluster` for
+recorded in the priors so that `dpm_init` can warn about a mismatch.
+
+`r` may also be a pair `(r1, r0)`, giving R = diag(1/rho, r1, r0). With the `RawData` method,
+`r = :auto` sets them from the data (`auto_sigma_scale`, an empirical-Bayes option; the default
+stays the fixed C3 value): use it when the covariates explain most of the outcome variance, where
+the fixed r shrinks the selection covariances (Phase 5b). Pass `slopes = :cluster` for
 per-cluster slopes (outcome slope sd 0.5), with `InputParams(slopes = :cluster)` for `marginal`.
 
 The calibration, its targets and the comparison with the other candidates are in
@@ -176,7 +181,7 @@ function setup_default_priors(kx::Integer, kz::Integer;
                               slopes::Symbol = :common,
                               sd_outcome::Real = slopes == :common ? 1.0 : 0.5,
                               rho::Integer = 10,
-                              r::Real = 0.153,
+                              r::Union{Real,Tuple{Real,Real}} = 0.153,
                               xintercept::Union{Integer,Nothing} = 1,
                               zintercept::Union{Integer,Nothing} = 1)
     kx >= 1 && kz >= 1 || throw(ArgumentError("kx and kz must be positive, got kx = $kx, kz = $kz"))
@@ -193,21 +198,52 @@ function setup_default_priors(kx::Integer, kz::Integer;
     prior_dp = PriorDP(J=Int(J), alpha=Float64(alpha), alpha_shape=Float64(alpha_shape),
                        alpha_rate=Float64(alpha_rate))
     prior_beta = PriorBeta(mu=zeros(kz + 2kx), V=Matrix(inv(V0)), Vinv=true)
-    prior_sigma = PriorSigma(rho=Int(rho), R=Matrix(Diagonal([1/rho, r, r])))
+    r1, r0 = r isa Tuple ? (Float64(r[1]), Float64(r[2])) : (Float64(r), Float64(r))
+    prior_sigma = PriorSigma(rho=Int(rho), R=Matrix(Diagonal([1/rho, r1, r0])))
     return InputPriors(prior_dp=prior_dp, prior_theta=PriorTheta(prior_beta=prior_beta, prior_Sigma=prior_sigma),
                        slopes=slopes)
 end
 
 ## intercept positions read from the formulas, by column name
-function setup_default_priors(raw::RawData; kwargs...)
+function setup_default_priors(raw::RawData; r=0.153, kwargs...)
     xnames = string.(coefnames(ModelFrame(raw.y_form, raw.df)))
     znames = string.(coefnames(ModelFrame(raw.d_form, raw.df)))
     xnames isa AbstractVector || (xnames = [xnames])
     znames isa AbstractVector || (znames = [znames])
+    r === :auto && (r = auto_sigma_scale(raw).r)
     return setup_default_priors(length(xnames), length(znames);
                                 xintercept=findfirst(==("(Intercept)"), xnames),
-                                zintercept=findfirst(==("(Intercept)"), znames), kwargs...)
+                                zintercept=findfirst(==("(Intercept)"), znames), r=r, kwargs...)
 end
+
+"""
+    auto_sigma_scale(raw; rmin = 0.01, rmax = 0.5) -> (r = (r1, r0), s2 = (s1^2, s0^2))
+
+The data-adaptive Sigma scale behind `setup_default_priors(raw; r = :auto)` (Phase 6a), mildly
+data-dependent (empirical Bayes). On the sampler's scale (y standardized by its sample sd), run
+per-arm OLS of y on x among the treated and among the controls; with residual variances s1^2 and
+s0^2, set r_k = 0.153 s_k^2 / 0.3, clamped to [rmin, rmax]. C3's r = 0.153 gives a prior median
+within-cluster variance of about 0.3 (Phase 2, linear in r), so this puts the prior median of
+sigma_kk near s_k^2. Phase 5b: with strong covariates (outcome R^2 0.94) C3's fixed r shrinks the
+selection covariances, and r near the data's scale removes that.
+"""
+function auto_sigma_scale(raw::RawData; rmin::Real=0.01, rmax::Real=0.5)
+    mf = ModelFrame(raw.y_form, raw.df)
+    X = modelmatrix(mf)
+    y = Float64.(response(mf))
+    d = Int.(response(ModelFrame(raw.d_form, raw.df)))
+    vy = var(y)
+    s2 = map((1, 0)) do arm
+        idx = findall(==(arm), d)
+        length(idx) > size(X, 2) || throw(ArgumentError("too few units with d = $arm for the per-arm OLS"))
+        Xa, ya = X[idx, :], y[idx]
+        e = ya - Xa * (Xa \ ya)
+        sum(abs2, e) / (length(idx) - size(X, 2)) / vy
+    end
+    r = Tuple(clamp(0.153 * s / 0.3, rmin, rmax) for s in s2)
+    return (r=r, s2=s2)
+end
+
 
 """
     setup_default_priors(ktot::Int; alpha=1.0, J=20, beta_nu=100.0, rho=6.0, r=2.0)
