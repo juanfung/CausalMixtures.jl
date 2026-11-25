@@ -5,11 +5,16 @@
 # bugs: none, sigma_dof, no_beta_unc, no_phi, no_shift, alpha_fixed_indicator (Phases 4a-4b);
 # r3_posterior, r3_no_redraw, r3_no_redraw_dfirst, r3_dfirst, r3_scale_R, r3_dof (Phase 4c, R3;
 # R3 is off by default since 4d, so these need sigma23_step = true to have an effect);
-# hier_shape_k, hier_pred_fixed (Phase 4d, hierarchical intercepts)
+# hier_shape_k, hier_pred_fixed (Phase 4d, hierarchical intercepts);
+# ridge_omega_noprior, ridge_separate, ridge_wrong_nu (Phase 4f, ridge block);
+# latent_c0y_flip, latent_trunc_side (the latent refresh; testable since the harness runs it first).
+# The r3_* bugs run with R3 on. CM_RIDGE=0 runs with the ridge block off.
 include(joinpath(@__DIR__, "..", "test", "GewekeHarness.jl")); using .GewekeHarness
 using CausalMixtures, Random, LinearAlgebra
 const CM = CausalMixtures
 bug = ARGS[1]
+GewekeHarness.R3[] = startswith(bug, "r3_")
+GewekeHarness.RIDGE[] = get(ENV, "CM_RIDGE", "1") == "1"
 M_sc = length(ARGS) > 1 ? parse(Int, ARGS[2]) : 50_000
 M_mc = length(ARGS) > 2 ? parse(Int, ARGS[3]) : 100_000
 if bug == "sigma_dof"      # Sigma_j ~ NobileWishart(rho + n_j + 1, ...)
@@ -153,6 +158,87 @@ elseif bug == "hier_pred_fixed"  # label step (collapsed and auxiliary predictiv
         end
         input.priors.prior_dp.alpha_shape != 0.0 && update_alpha!(rng, state, input)
         D.hier && update_hyper!(rng, state, D)
+        return state
+    end
+end
+if bug == "ridge_omega_noprior"  # Omega update without the +1 and the Psi11 (delta - c)(delta - c)' term
+    @eval CM function ridge_omega_post(idx::AbstractVector{<:Integer}, ztf, Wc::AbstractMatrix{Float64},
+                                       Xc::AbstractMatrix{Float64}, bc::AbstractVector{Float64},
+                                       d::AbstractVector{Float64}, rp::RidgePrior)
+        kz, kx = size(Wc, 2), size(Xc, 2)
+        g, b1, b0 = coef_blocks(kx, kz)
+        S = copy(rp.Psi221)
+        for i in idx
+            z = ztf(i)
+            v = z[1] - sum(Wc[i, a] * bc[g[a]] for a in 1:kz)
+            e1 = z[2] - v * d[1] - sum(Xc[i, a] * bc[b1[a]] for a in 1:kx)
+            e0 = z[3] - v * d[2] - sum(Xc[i, a] * bc[b0[a]] for a in 1:kx)
+            S[1, 1] += e1^2; S[1, 2] += e1 * e0; S[2, 2] += e0^2
+        end
+        S[2, 1] = S[1, 2]
+        return rp.nu + length(idx), Matrix(Symmetric(S))
+    end
+elseif bug == "ridge_separate"  # B | delta, Omega, then delta | B, Omega (two exact conditional draws: valid)
+    @eval CM function ridge_draw(rng::AbstractRNG, idx::AbstractVector{<:Integer}, ztf, Wc::AbstractMatrix{Float64},
+                                 Xc::AbstractMatrix{Float64}, bc::AbstractVector{Float64}, mu_c::AbstractVector{Float64},
+                                 Vc::AbstractMatrix{Float64}, Sigma::AbstractMatrix{Float64}, rp::RidgePrior)
+        d0, O = sigma_delta_omega(Sigma)
+        P, r, ob = ridge_theta_post(idx, ztf, Wc, Xc, bc, mu_c, Vc, O, rp)
+        p = length(ob)
+        Bi, Di = 1:p, p+1:p+2
+        ## B | delta = d0: precision P_BB, mean P_BB^-1 (r_B - P_BD d0)
+        CB = cholesky(Symmetric(P[Bi, Bi]))
+        B = CB \ (r[Bi] - P[Bi, Di] * d0) + CB.U \ randn(rng, p)
+        ## delta | B
+        CD = cholesky(Symmetric(P[Di, Di]))
+        d = CD \ (r[Di] - P[Di, Bi] * B) + CD.U \ randn(rng, 2)
+        bc_new = copy(bc); bc_new[ob] = B
+        df, S = ridge_omega_post(idx, ztf, Wc, Xc, bc_new, d, rp)
+        O_new = rand(rng, InverseWishart(df, S))
+        return bc_new, sigma_from_delta_omega(d, Matrix(Symmetric(O_new)))
+    end
+elseif bug == "ridge_wrong_nu"  # nu_Omega = rho - 1 instead of rho
+    @eval CM function RidgePrior(ps::PriorSigma)
+        Psi = ps.rho .* ps.R
+        Psi11 = Psi[1, 1]
+        c = Psi[2:3, 1] ./ Psi11
+        Psi221 = Matrix(Symmetric(Psi[2:3, 2:3] - Psi[2:3, 1] * Psi[1, 2:3]' ./ Psi11))
+        return RidgePrior(Psi11, c, Psi221, Float64(ps.rho - 1))
+    end
+end
+if bug == "latent_c0y_flip"  # y0 | d*, y1: the coefficient on (y1 - m1) with its sign flipped
+    @eval CM function LatentMoments(S::AbstractMatrix{Float64})
+        mid = S[2,3] * S[1,3] * S[1,2]
+        denom1 = S[2,2] - S[1,2]^2
+        denom0 = S[3,3] - S[1,3]^2
+        denomd = S[2,2] * S[3,3] - S[2,3]^2
+        return LatentMoments(
+            ( (S[3,3] * S[1,2]) - (S[2,3] * S[1,3]) ) / denom0,
+            ( S[2,3] - (S[1,3] * S[1,2]) ) / denom0,
+            S[2,2] - ( ( (S[1,2]^2 * S[3,3]) - 2*mid + (S[2,3]^2) ) / denom0 ),
+            ( (S[2,2] * S[1,3]) - (S[2,3] * S[1,2]) ) / denom1,
+            -( S[2,3] - (S[1,3] * S[1,2]) ) / denom1,
+            S[3,3] - ( ( (S[1,3]^2 * S[2,2]) - 2*mid + (S[2,3]^2) ) / denom1 ),
+            ( (S[3,3] * S[1,2]) - (S[2,3] * S[1,3]) ) / denomd,
+            ( (S[2,2] * S[1,3]) - (S[2,3] * S[1,2]) ) / denomd,
+            1 - ( ( (S[1,2]^2 * S[3,3]) - 2*mid + (S[1,3]^2 * S[2,2]) ) / denomd ))
+    end
+elseif bug == "latent_trunc_side"  # d* truncated to the wrong side of 0
+    @eval CM function update_latent!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, j::Integer, idx::AbstractVector{<:Integer})
+        th = state.state_theta[j]
+        lm = LatentMoments(th.Sigma)
+        sdd = sqrt(lm.omega_d)
+        X, W = input.data.X, input.data.W
+        y, d = input.data.y.a, input.data.d
+        sd = state.state_data
+        @inbounds for i in idx
+            md, m1, m0 = unit_mean(X, W, th.beta, i)
+            y1, y0 = draw_ymiss(rng, lm, md, m1, m0, sd.dstar[i], y[i], d[i])
+            sd.y1[i] = y1
+            sd.y0[i] = y0
+            mu_d = md + (y1 - m1) * lm.sd1 + (y0 - m0) * lm.sd0
+            sd.dstar[i] = rand(rng, d[i] == 1 ? truncated(Normal(mu_d, sdd), -Inf, 0.0) : truncated(Normal(mu_d, sdd), 0.0, Inf))
+        end
         return state
     end
 end
