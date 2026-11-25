@@ -183,6 +183,8 @@ function sync_hyper!(state::GibbsState, D::DesignA)
     if isempty(h.m)
         h.m, h.tau2 = copy(D.mu_m), D.tau_scale ./ (D.tau_shape - 1)
     end
+    ## D already holds (m, tau2) when update_hyper! set it at the end of the last sweep
+    D.mu_c[D.icidx] == h.m && diag(D.Vc)[D.icidx] == h.tau2 && return D
     return set_cprior!(D, h.m, h.tau2)
 end
 
@@ -422,7 +424,7 @@ function update_marginal_labels!(rng::AbstractRNG, state::GibbsState, input::Gib
     kc = length(D.cidx)
     ## per-slot statistics, Sigma^-1 and posterior caches
     stats = [cluster_stats(state, D, b, dp.members[j]) for j in 1:K]
-    Sinv = [inv(state.state_theta[j].Sigma) for j in 1:K]
+    Sinv = [Matrix(inv(Symmetric(state.state_theta[j].Sigma))) for j in 1:K]
     post = [post_cache!(PostCache(kc), stats[j], D, Sinv[j]) for j in 1:K]
     saved = zeros(kc, kc) # Q^-1 of unit i's cluster before its removal
     m = D.m_aux
@@ -489,12 +491,12 @@ function update_marginal_labels!(rng::AbstractRNG, state::GibbsState, input::Gib
                 ji = free
                 state.state_theta[ji] = th
                 stats[ji] = ClusterStats(D)
-                Sinv[ji] = inv(Sig)
+                Sinv[ji] = Matrix(inv(Symmetric(Sig)))
             else
                 push!(dp.njs, 0)
                 push!(state.state_theta, th)
                 push!(stats, ClusterStats(D))
-                push!(Sinv, inv(Sig))
+                push!(Sinv, Matrix(inv(Symmetric(Sig))))
                 push!(post, PostCache(kc))
                 ji = length(dp.njs)
             end
@@ -530,7 +532,7 @@ function update_marginal_coefs!(rng::AbstractRNG, state::GibbsState, D::DesignA)
     for j in 1:state.state_dp.J
         th = state.state_theta[j]
         st = cluster_stats(state, D, b, state.state_dp.members[j])
-        C, mj = cluster_post(st, D, inv(th.Sigma))
+        C, mj = cluster_post(st, D, Matrix(inv(Symmetric(th.Sigma))))
         bc = mj + C.U \ randn(rng, length(mj))
         state.state_theta[j] = Theta(beta=full_beta(D, bc, b), Sigma=th.Sigma)
     end
@@ -547,7 +549,7 @@ function update_global_slopes!(rng::AbstractRNG, state::GibbsState, D::DesignA)
     for j in 1:state.state_dp.J
         idx = state.state_dp.members[j]
         th = state.state_theta[j]
-        Sinv = inv(th.Sigma)
+        Sinv = Matrix(inv(Symmetric(th.Sigma)))
         bc = th.beta[D.cidx]
         Wg, Xg = D.Wg[idx, :], D.Xg[idx, :]
         U = Matrix{Float64}(undef, length(idx), 3) # z - H^c beta^c
@@ -665,7 +667,7 @@ function rand_marginal(rng::AbstractRNG, out::GibbsOut, input::GibbsInput, hnew:
         if jm <= length(dp.njs)
             beta, Sigma = th[jm].beta, th[jm].Sigma
         else
-            if D.hier && length(out.out_hyper) >= m && !isempty(out.out_hyper[m])
+            if D.hier && isassigned(out.out_hyper, m) && length(out.out_hyper[m]) == 6
                 set_cprior!(D, out.out_hyper[m][1:3], out.out_hyper[m][4:6])
             end
             ## a new cluster: beta^c from its prior, the shared b from the draw, Sigma from G0

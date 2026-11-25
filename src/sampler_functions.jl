@@ -400,6 +400,8 @@ end
 function slice_sigma23(rng::AbstractRNG, S::AbstractMatrix{Float64}, V::AbstractMatrix{Float64}, nu::Real)
     L, U = sigma23_interval(S)
     x0 = S[2, 3]
+    ## a (near-)degenerate interval: sigma23 is pinned at s12 s13 to machine precision
+    U - L <= 1e-12 * max(1.0, abs(x0)) && return x0
     logy = sigma23_logdens(S, x0, V, nu) - randexp(rng)
     for _ in 1:10_000
         x1 = L + (U - L) * rand(rng)
