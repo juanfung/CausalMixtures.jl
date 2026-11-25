@@ -22,7 +22,9 @@
 ##        incrementally as units move.
 ##  (ii)  beta^c_j | Sigma_j, z, b ~ N(Q_j^-1 r_j, Q_j^-1)
 ##  (iii) b | everything (:common only), accumulated per cluster with Sigma_j^-1 weights
-##  (iv)  Sigma_j ~ NobileWishart(rho + n_j, rho R + sum e e')
+##  (iv)  ridge_block = true (default, Phase 4f, src/ridge_block.jl): per cluster, the outcome
+##        coefficients and delta = (sigma12, sigma13) jointly | Omega, then Omega = Var(y1, y0 | d*);
+##        ridge_block = false: Sigma_j ~ NobileWishart(rho + n_j, rho R + sum e e')
 ##  (iv') R3 (sigma23_step = true, Phase 4c): sigma23_j from its prior conditional (y_miss
 ##        integrated out, the likelihood does not involve sigma23), by slice sampling, then
 ##        y_miss of j's members redrawn (update_sigma23!)
@@ -595,7 +597,11 @@ function marginal_sweep!(rng::AbstractRNG, state::GibbsState, input::GibbsInput,
     update_marginal_labels!(rng, state, input, D; r2 = input.params.label_step == :r2 && !test)
     update_marginal_coefs!(rng, state, D)                # (ii)
     update_global_slopes!(rng, state, D)                 # (iii)
-    update_marginal_sigmas!(rng, state, input)           # (iv)
+    if input.params.ridge_block                          # (iv) ridge block (Phase 4f) or Sigma | beta
+        update_marginal_ridge!(rng, state, input, D)
+    else
+        update_marginal_sigmas!(rng, state, input)
+    end
     if !test && input.params.sigma23_step                # (iv') R3
         for j in 1:state.state_dp.J
             update_sigma23!(rng, state, input, j, state.state_dp.members[j])

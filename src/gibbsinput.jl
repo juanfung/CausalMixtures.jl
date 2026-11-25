@@ -56,7 +56,9 @@ InputData(; y=ScaleData(a=[0.0]), d=[0], lower=[0.0], upper=[0.0], Hmat=sparse([
 ## :augmented (scored on the current latent data, Phase 4a). `sigma23_step` turns on R3, the
 ## collapsed sigma23 step (Phase 4c), in the marginal and gaussian samplers (off by default: it
 ## did not improve mixing). `hierarchical` makes Design A's cluster intercepts hierarchical,
-## a_j ~ N(m, diag(tau2)) with m and tau2 drawn every sweep (Phase 4d).
+## a_j ~ N(m, diag(tau2)) with m and tau2 drawn every sweep (Phase 4d). `ridge_block` replaces the
+## Sigma update of the marginal and gaussian samplers with the joint (outcome coefficients,
+## sigma12, sigma13) draw and Omega = Var(y1, y0 | d*) (Phase 4f).
 mutable struct InputParams
     M::Int64
     scale_data::Tuple{Bool,Bool}
@@ -68,18 +70,19 @@ mutable struct InputParams
     label_step::Symbol
     sigma23_step::Bool
     hierarchical::Bool
-    function InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step, sigma23_step, hierarchical)
+    ridge_block::Bool
+    function InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step, sigma23_step, hierarchical, ridge_block)
         thin >= 1 || throw(ArgumentError("thin must be >= 1, got $thin"))
         latent_thin >= 0 || throw(ArgumentError("latent_thin must be >= 0, got $latent_thin"))
         slopes in (:common, :cluster) || throw(ArgumentError("slopes must be :common or :cluster, got $slopes"))
         label_step in (:r2, :augmented) || throw(ArgumentError("label_step must be :r2 or :augmented, got $label_step"))
-        return new(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step, sigma23_step, hierarchical)
+        return new(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step, sigma23_step, hierarchical, ridge_block)
     end
 end
 
 InputParams(; M=100, scale_data=(false,false), verbose=true, model="dpm", thin=1, latent_thin=0, slopes=:common,
-            label_step=:r2, sigma23_step=false, hierarchical=true) =
-    InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step, sigma23_step, hierarchical)
+            label_step=:r2, sigma23_step=false, hierarchical=true, ridge_block=true) =
+    InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step, sigma23_step, hierarchical, ridge_block)
 ## set default model to dpm
 InputParams(m, s, v) = InputParams(M=m, scale_data=s, verbose=v, model="dpm")
 

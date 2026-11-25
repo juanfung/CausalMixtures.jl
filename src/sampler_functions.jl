@@ -192,8 +192,9 @@ function update_params!(rng::AbstractRNG, state::GibbsState, input::GibbsInput)
 end
 
 ## update theta_j = (beta_j, Sigma_j) given the latent data of its members idx:
-## Sigma_j | beta_j, then beta_j | Sigma_j
-function update_theta!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, j::Integer, idx::AbstractVector{<:Integer})
+## Sigma_j | beta_j, then beta_j | Sigma_j (sigma = false: beta_j | Sigma_j only)
+function update_theta!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, j::Integer, idx::AbstractVector{<:Integer};
+                       sigma::Bool=true)
     p = input.priors.prior_theta
     kx, kz = input.dims.kx, input.dims.kz
     g, b1, b0 = coef_blocks(kx, kz)
@@ -214,7 +215,7 @@ function update_theta!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, j
          dot(e1, ed) dot(e1, e1) dot(e1, e0);
          dot(e0, ed) dot(e0, e1) dot(e0, e0)]
     U .+= p.prior_Sigma.rho .* p.prior_Sigma.R
-    Sigma_j = NobileWishart(rng, (nj + p.prior_Sigma.rho), U )
+    Sigma_j = sigma ? NobileWishart(rng, (nj + p.prior_Sigma.rho), U ) : state.state_theta[j].Sigma
 
     ## 2. beta ~ N(vj (H_j'(Sinv ⊗ I) z_j + V mu), vj), vj = (H_j'(Sinv ⊗ I)H_j + V)^-1
     Sinv = inv(Sigma_j)
@@ -424,8 +425,14 @@ end
 
 function update_gaussian_params!(rng::AbstractRNG, state::GibbsState, input::GibbsInput)
     idx = 1:input.dims.n
-    ## update theta
-    state = update_theta!(rng, state, input, 1, idx)
+    ## update theta: with the ridge block, beta | Sigma and then the joint (beta1, beta0, sigma12,
+    ## sigma13) | Omega, gamma and Omega | rest (Phase 4f); otherwise Sigma | beta, beta | Sigma
+    if input.params.ridge_block
+        state = update_theta!(rng, state, input, 1, idx; sigma=false)
+        update_gaussian_ridge!(rng, state, input)
+    else
+        state = update_theta!(rng, state, input, 1, idx)
+    end
     ## R3: collapsed sigma23 step (and y_miss redraw)
     input.params.sigma23_step && update_sigma23!(rng, state, input, 1, idx)
     ## update latent data

@@ -45,6 +45,7 @@ include("gibbsppd.jl")
 ## load main functions
 include("misc_functions.jl")
 include("sampler_functions.jl")
+include("ridge_block.jl")
 include("dpm_init.jl")
 
 ## polya-urn sampler
