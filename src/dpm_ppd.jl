@@ -173,6 +173,19 @@ function ppd_design(input::GibbsInput, znew::AbstractVector{<:Real})
     return ppd_design(input, znew[idx], znew)
 end
 
+"""
+    rand_ppd([rng], out, input, xnew, wnew) -> 3 x S matrix
+    rand_ppd([rng], out, input, znew)
+
+Posterior predictive draws of a NEW unit's latent triple (d*, y1, y0) at covariates
+(`xnew`, `wnew`), one per saved draw, on the sampler's (standardized) scale. Pass the result to
+`dpm_ate` for the new unit's individual gain y1 - y0.
+
+These are *predictive* draws for one individual: their spread includes the unit's own errors, so
+it depends on sigma23 (which the data do not identify) and is far wider than the uncertainty
+about an average effect. Do not read their quantiles as credible intervals for the ATE or the
+TT: use `effects` and `effects_summary` for those.
+"""
 rand_ppd(rng::AbstractRNG, out::GibbsOut, input::GibbsInput, znew::AbstractVector{<:Real}) =
     rand_ppd(rng, out, input, ppd_design(input, znew))
 
@@ -198,7 +211,15 @@ function rand_ppd(rng::AbstractRNG, out::GibbsOut, input::GibbsInput, hnew::Spar
     return ppd
 end
 
-## given draws from posterior predictive, compute treatment effects
+"""
+    dpm_ate(ynew, input) -> TreatmentEffects
+
+The individual gain y1 - y0 of a new unit, on the original y scale, from the predictive draws
+`ynew` of `rand_ppd`: `ate` holds every draw's gain and `tt` the gains of the draws with d* > 0.
+These are draws from the predictive distribution of ONE unit's gain (which depends on sigma23),
+not posterior draws of the average treatment effect; their quantiles are predictive intervals.
+For credible intervals of PATE, PATT and PATU use `effects` and `effects_summary`.
+"""
 function dpm_ate(ynew::Matrix{Float64}, input::GibbsInput)
     sy = input.data.y.s[1]
     dNew = vec(ynew[1,:])

@@ -58,19 +58,34 @@ state, input, output = dpm!(init...; rng=rng)
 
 ### 4. Calculate Treatment Effects
 ```julia
-# Set prediction point: covariate means over all n units, matched to each equation by name
-xbar, wbar = mean_covariates(input)
+# Per-draw, label-invariant average effects on the original y scale (discard burn-in draws)
+eff = effects(output, input; rng=rng, burn=1000)
+s = effects_summary(eff)          # or effects_summary([eff1, eff2, ...]) over several chains
 
-# Generate posterior predictive draws
-ynew = rand_ppd(rng, output, input, xbar, wbar)
-
-# Calculate treatment effects
-tes = dpm_ate(ynew, input)
-
-# Results
-println("ATE: $(round(mean(tes.ate), digits=3))")
-println("95% CI: $(round.(quantile(tes.ate, [0.025, 0.975]), digits=3))")
+# Posterior mean and 95% credible interval of the population ATE, ATT and ATU
+for (name, v) in pairs(s)
+    v === nothing && continue      # satt/satu need saved latent draws (latent_thin > 0)
+    println("$(name): $(round(v.mean, digits=3))  95% CI $(round.(v.q[[1, 3]], digits=3))")
+end
 ```
+
+`effects` returns, per saved draw, PATE (the average of x'(β1 − β0) over the sample's
+covariates), PATT and PATU (the closed-form TT and TUT averaged over the treated and untreated
+units' own covariates), and, when latent draws are saved, the sample SATT and SATU. Their
+quantiles are **credible intervals** for these averages.
+
+The older `rand_ppd` + `dpm_ate` route gives something different: draws from the **predictive
+distribution of one new unit's gain** y1 − y0 at chosen covariates. Its spread includes that unit's
+own errors and depends on σ23, which the data do not identify, so its quantiles are predictive
+intervals for an individual, not confidence or credible intervals for the ATE:
+```julia
+xbar, wbar = mean_covariates(input)
+gains = dpm_ate(rand_ppd(rng, output, input, xbar, wbar), input)   # one new unit's gain
+```
+
+Partition summaries (with `latent_thin > 0`): `partition_summary(output; burn)` gives the posterior
+similarity matrix, a point partition (minimum expected Binder loss), the posterior of k and the
+separated-units share.
 
 ## Key Functions Reference
 
@@ -80,8 +95,10 @@ println("95% CI: $(round.(quantile(tes.ate, [0.025, 0.975]), digits=3))")
 | `setup_default_priors(raw_data)` | Default priors (C3, standardized scale) | or `setup_default_priors(kx, kz)`; the old `setup_default_priors(ktot)` is deprecated |
 | `dpm_init()` | Initialize sampler | Returns (state, input, output) |
 | `dpm!()` | Run MCMC sampler | Main sampling function |
-| `rand_ppd()` | Posterior predictive draws | Size: (3 × M) matrix |
-| `dpm_ate()` | Calculate treatment effects | Returns ATE, ATT, ATC |
+| `effects()` | Per-draw PATE, PATT, PATU (and SATT, SATU) | Original y scale; `effects_summary()` for credible intervals |
+| `partition_summary()` | Similarity matrix, point partition, posterior of k | Needs `latent_thin > 0` |
+| `rand_ppd()` | Predictive draws of a new unit's (d*, y1, y0) | Size: (3 × M) matrix |
+| `dpm_ate()` | A new unit's predictive gain y1 − y0 | Predictive intervals (depend on σ23), not ATE credible intervals |
 
 ## Sampler Status
 
