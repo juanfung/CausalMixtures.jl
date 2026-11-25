@@ -29,7 +29,7 @@ using .TestHelpers
 
     ## defaults (C3): V0 = diag(0.5², 0.5², 0.5², 1, 0.5², 1, 0.5²) for (gamma, beta1, beta0) with
     ## kz = 3, kx = 2 (the precision was used as the covariance before the fix)
-    pr = setup_default_priors(2, 3)
+    pr = setup_default_priors(2, 3; slopes=:cluster)
     V0 = Matrix(Diagonal([0.25, 0.25, 0.25, 1.0, 0.25, 1.0, 0.25]))
     @test pr.prior_theta.prior_beta.V ≈ inv(V0)
     @test pr.prior_theta.prior_beta.Vcov ≈ V0
@@ -314,7 +314,7 @@ end
     @test !isdefined(CausalMixtures, :update_marginal_params!)
     data = generate_hedonic_data(40, 8)
     raw = CausalMixtures.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
-    priors = setup_default_priors(2, 3, J=3)
+    priors = setup_default_priors(2, 3, J=3, slopes=:cluster)
     ## priors built for :cluster with the default slopes = :common: warn about the mismatch
     @test_logs (:warn, r"slopes") CausalMixtures.dpm_init(raw, priors,
         CausalMixtures.InputParams(M=1, verbose=false, model="marginal"))
