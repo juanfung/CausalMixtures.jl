@@ -14,11 +14,14 @@ module GewekeHarness
 using CausalMixtures, Random, Statistics, LinearAlgebra, Distributions
 const CM = CausalMixtures
 
-export geweke_run, geweke_table, HIER
+export geweke_run, geweke_table, HIER, R3, RIDGE
 
 ## hierarchical intercepts in the marginal sampler (Phase 4d default); set HIER[] = false for
 ## the fixed-prior sampler
 const HIER = Ref(true)
+## R3 (sigma23_step) and the ridge block in the marginal and gaussian samplers
+const R3 = Ref(false)
+const RIDGE = Ref(true)
 
 ## the model's prior as a PriorSpec (C3; shared outcome slopes N(0, 1) under :common)
 function harness_spec(model::String, slopes::Symbol)
@@ -36,7 +39,7 @@ function harness_input(model::String, slopes::Symbol; n::Int=20, seed::Int=1, J:
     data = generate_hedonic_data(n, seed)
     raw = CM.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
     params = CM.InputParams(M=1, scale_data=(true, true), verbose=false, model=model, slopes=slopes,
-                            hierarchical = model == "marginal" && HIER[])
+                            hierarchical = model == "marginal" && HIER[], sigma23_step=R3[], ridge_block=RIDGE[])
     pr = setup_default_priors(2, 3; J = model == "gaussian" ? 1 : J,
                               slopes = model == "marginal" ? slopes : :cluster)
     state, input, _ = CM.dpm_init(raw, pr, params; rng=Xoshiro(seed))
@@ -59,6 +62,8 @@ function stat_names(model, slopes, input)
     append!(nm, collect(SIGMA_NAMES))
     if slopes == :common && model == "marginal"
         append!(nm, ["b$(j)" for j in eachindex(slope_idx(input))])
+    else
+        append!(nm, ["slope$(j)" for j in eachindex(slope_idx(input))])   # unit 1's cluster
     end
     if model == "marginal" && HIER[]
         append!(nm, ["m_d", "m_1", "m_0", "log tau2_d", "log tau2_1", "log tau2_0"])
@@ -76,9 +81,7 @@ function stats_from(model, slopes, input, alpha, labels, njs, betas, Sigmas, hyp
     model == "gaussian" || append!(v, [alpha, count(>(0), njs)])
     append!(v, [betas[c1][i_d], betas[c1][i_1], betas[c1][i_0]])
     append!(v, collect(sigma_entries(Sigmas[c1])))
-    if slopes == :common && model == "marginal"
-        append!(v, betas[c1][slope_idx(input)])
-    end
+    append!(v, betas[c1][slope_idx(input)])   # shared b (:common marginal) or unit 1's cluster slopes
     if model == "marginal" && HIER[]
         append!(v, hyper[1:3], log.(hyper[4:6]))
     end
@@ -142,14 +145,22 @@ function simulate_z(rng, state, input)
     return z
 end
 
+## One sweep, rotated so that the latent steps (R3 when on, then the latent refresh) run FIRST,
+## right after the latent data are simulated: the rest of the sweep conditions on their output,
+## so the statistics see them. (Run last, as in the samplers, their output would be overwritten
+## by the next simulate_z and never tested.) A rotation of a valid sweep is a valid sweep.
 function sweep!(rng, state, input, model, D)
     if model == "marginal"
-        CM.marginal_sweep!(rng, state, input, D)
+        CM.marginal_sweep!(rng, state, input, D; latent_first=true)
     elseif model == "gaussian"
-        CM.update_gaussian_params!(rng, state, input)
+        CM.update_gaussian_params!(rng, state, input; latent_first=true)
     elseif model == "blocked"
+        dp = state.state_dp
+        for j in eachindex(dp.njs)
+            dp.njs[j] > 0 && CM.update_latent!(rng, state, input, j, dp.members[j])
+        end
         CM.update_blocked_labels!(rng, state, input)
-        CM.update_blocked_params!(rng, state, input)
+        CM.update_blocked_params!(rng, state, input; latent=false)
         CM.update_blocked_alpha!(rng, state, input)
     else
         error("no Geweke sweep for $model")

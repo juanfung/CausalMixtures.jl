@@ -591,8 +591,25 @@ function update_marginal_sigmas!(rng::AbstractRNG, state::GibbsState, input::Gib
 end
 
 ## one Design A sweep, (i)-(vi); test = true keeps the latent data fixed
-function marginal_sweep!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, D::DesignA; test::Bool=false)
+## the latent steps of the sweep: (iv') R3 when on, then (v) the latent refresh
+function marginal_latent!(rng::AbstractRNG, state::GibbsState, input::GibbsInput)
+    if input.params.sigma23_step                         # (iv') R3
+        for j in 1:state.state_dp.J
+            update_sigma23!(rng, state, input, j, state.state_dp.members[j])
+        end
+    end
+    for j in 1:state.state_dp.J                          # (v)
+        update_latent!(rng, state, input, j, state.state_dp.members[j])
+    end
+    return state
+end
+
+## latent_first = true runs (iv')-(v) first, before (i): a rotation of the sweep, used by the
+## Geweke harness so that the latent steps' output is seen by the statistics
+function marginal_sweep!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, D::DesignA; test::Bool=false,
+                         latent_first::Bool=false)
     sync_hyper!(state, D)                                # the prior of beta^c from (m, tau2)
+    latent_first && !test && marginal_latent!(rng, state, input)
     ## (i) R2 by default; test = true keeps the latent data fixed, so it scores z~ instead
     update_marginal_labels!(rng, state, input, D; r2 = input.params.label_step == :r2 && !test)
     update_marginal_coefs!(rng, state, D)                # (ii)
@@ -602,16 +619,7 @@ function marginal_sweep!(rng::AbstractRNG, state::GibbsState, input::GibbsInput,
     else
         update_marginal_sigmas!(rng, state, input)
     end
-    if !test && input.params.sigma23_step                # (iv') R3
-        for j in 1:state.state_dp.J
-            update_sigma23!(rng, state, input, j, state.state_dp.members[j])
-        end
-    end
-    if !test                                             # (v)
-        for j in 1:state.state_dp.J
-            update_latent!(rng, state, input, j, state.state_dp.members[j])
-        end
-    end
+    !latent_first && !test && marginal_latent!(rng, state, input)   # (iv') R3, (v) latent refresh
     if input.priors.prior_dp.alpha_shape != 0.0          # (vi)
         update_alpha!(rng, state, input)
     end

@@ -423,8 +423,14 @@ end
 ## --------------------------------------------------------------------------- #
 ## specialized functions for Gaussian model
 
-function update_gaussian_params!(rng::AbstractRNG, state::GibbsState, input::GibbsInput)
+## latent_first = true: R3 (when on) and the latent refresh first, then theta (a rotation, for the
+## Geweke harness)
+function update_gaussian_params!(rng::AbstractRNG, state::GibbsState, input::GibbsInput; latent_first::Bool=false)
     idx = 1:input.dims.n
+    if latent_first
+        input.params.sigma23_step && update_sigma23!(rng, state, input, 1, idx)
+        update_latent!(rng, state, input, 1, idx)
+    end
     ## update theta: with the ridge block, beta | Sigma and then the joint (beta1, beta0, sigma12,
     ## sigma13) | Omega, gamma and Omega | rest (Phase 4f); otherwise Sigma | beta, beta | Sigma
     if input.params.ridge_block
@@ -433,6 +439,7 @@ function update_gaussian_params!(rng::AbstractRNG, state::GibbsState, input::Gib
     else
         state = update_theta!(rng, state, input, 1, idx)
     end
+    latent_first && return state
     ## R3: collapsed sigma23 step (and y_miss redraw)
     input.params.sigma23_step && update_sigma23!(rng, state, input, 1, idx)
     ## update latent data
@@ -561,7 +568,8 @@ function sample_prior_theta!(rng::AbstractRNG, state_theta::StateTheta, prior_th
 end
 
 ## update parameters {LatentData, Theta}
-function update_blocked_params!(rng::AbstractRNG, state::GibbsState, input::GibbsInput)
+## latent = false skips the latent refresh (the Geweke harness runs it first instead)
+function update_blocked_params!(rng::AbstractRNG, state::GibbsState, input::GibbsInput; latent::Bool=true)
     @inbounds for j in 1:input.priors.prior_dp.J
         if state.state_dp.njs[j] == 0
             ## sample from prior
@@ -570,7 +578,7 @@ function update_blocked_params!(rng::AbstractRNG, state::GibbsState, input::Gibb
             ## sample from posterior
             idx = state.state_dp.members[j]
             state = update_theta!(rng, state, input, j, idx)
-            state = update_latent!(rng, state, input, j, idx)
+            latent && (state = update_latent!(rng, state, input, j, idx))
         end
     end
     return state
