@@ -26,9 +26,9 @@ function heckman(input)
     g = zeros(size(W, 2))
     for _ in 1:50
         s = W * g; q = 2 .* d .- 1
-        lam = q .* pdf.(Normal(), q .* s) ./ cdf.(Normal(), q .* s)
-        H = -transpose(W) * (lam .* (lam .+ q .* s) .* W)
-        g -= H \ (transpose(W) * lam)
+        lt = pdf.(Normal(), q .* s) ./ cdf.(Normal(), q .* s)
+        H = -transpose(W) * ((lt .* (lt .+ q .* s)) .* W)
+        g -= H \ (transpose(W) * (q .* lt))
     end
     s = W * g; lt = pdf.(Normal(), s) ./ cdf.(Normal(), s); lu = -pdf.(Normal(), s) ./ (1 .- cdf.(Normal(), s))
     t, u = d .== 1, d .== 0
