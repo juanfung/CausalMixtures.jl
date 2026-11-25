@@ -3,7 +3,9 @@
 # modes and for gaussian.
 #   julia --project=. bench/geweke_power.jl <bug> [M_sc] [M_mc]   (default 50000 100000)
 # bugs: none, sigma_dof, no_beta_unc, no_phi, no_shift, alpha_fixed_indicator (Phases 4a-4b);
-# r3_posterior, r3_no_redraw, r3_no_redraw_dfirst, r3_dfirst, r3_scale_R, r3_dof (Phase 4c, R3)
+# r3_posterior, r3_no_redraw, r3_no_redraw_dfirst, r3_dfirst, r3_scale_R, r3_dof (Phase 4c, R3;
+# R3 is off by default since 4d, so these need sigma23_step = true to have an effect);
+# hier_shape_k, hier_pred_fixed (Phase 4d, hierarchical intercepts)
 include(joinpath(@__DIR__, "..", "test", "GewekeHarness.jl")); using .GewekeHarness
 using CausalMixtures, Random, LinearAlgebra
 const CM = CausalMixtures
@@ -116,6 +118,41 @@ if bug in ("r3_no_redraw_dfirst", "r3_dfirst")  # latent refresh draws d* before
             sd.dstar[i] = rand(rng, truncated(Normal(mu_d, sdd), lower[i], upper[i]))
             sd.y1[i], sd.y0[i] = draw_ymiss(rng, lm, md, m1, m0, sd.dstar[i], y[i], d[i])
         end
+        return state
+    end
+end
+if bug == "hier_shape_k"  # tau2 | a, m with shape 3 + k instead of 3 + k/2
+    @eval CM function update_hyper!(rng::AbstractRNG, state::GibbsState, D::DesignA)
+        h = state.state_hyper
+        pos = D.cidx[D.icidx]
+        occ = [j for j in eachindex(state.state_dp.njs) if state.state_dp.njs[j] > 0]
+        k = length(occ)
+        for l in 1:3
+            sa = sum(state.state_theta[j].beta[pos[l]] for j in occ)
+            P = 1 / D.Vm[l] + k / h.tau2[l]
+            h.m[l] = (D.mu_m[l] / D.Vm[l] + sa / h.tau2[l]) / P + randn(rng) / sqrt(P)
+        end
+        for l in 1:3
+            ss = sum((state.state_theta[j].beta[pos[l]] - h.m[l])^2 for j in occ)
+            h.tau2[l] = rand(rng, InverseGamma(D.tau_shape + k, D.tau_scale[l] + ss / 2))
+        end
+        return set_cprior!(D, h.m, h.tau2)
+    end
+elseif bug == "hier_pred_fixed"  # label step (collapsed and auxiliary predictives) under the fixed (mu, V), not (m, T)
+    @eval CM function marginal_sweep!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, D::DesignA; test::Bool=false)
+        set_cprior!(D, D.mu_m, D.Vm)
+        update_marginal_labels!(rng, state, input, D; r2 = input.params.label_step == :r2 && !test)
+        sync_hyper!(state, D)
+        update_marginal_coefs!(rng, state, D)
+        update_global_slopes!(rng, state, D)
+        update_marginal_sigmas!(rng, state, input)
+        if !test
+            for j in 1:state.state_dp.J
+                update_latent!(rng, state, input, j, state.state_dp.members[j])
+            end
+        end
+        input.priors.prior_dp.alpha_shape != 0.0 && update_alpha!(rng, state, input)
+        D.hier && update_hyper!(rng, state, D)
         return state
     end
 end
