@@ -21,7 +21,7 @@ export geweke_run, geweke_table, HIER, R3, RIDGE
 const HIER = Ref(true)
 ## R3 (sigma23_step) and the ridge block in the marginal and gaussian samplers
 const R3 = Ref(false)
-const RIDGE = Ref(true)
+const RIDGE = Ref(false)
 
 ## the model's prior as a PriorSpec (C3; shared outcome slopes N(0, 1) under :common)
 function harness_spec(model::String, slopes::Symbol)

@@ -103,8 +103,8 @@ end
     @test maximum(abs, cov(D) - cov(post)) < 0.05 * maximum(abs, cov(post))
 end
 
-@testset "ridge_block option: default on, both samplers run" begin
-    @test CMR.InputParams().ridge_block == true
+@testset "ridge_block option: default off, both samplers run either way" begin
+    @test CMR.InputParams().ridge_block == false
     data = generate_hedonic_data(60, 5)
     raw = CMR.RawData(data.formulas.formula_y, data.formulas.formula_d, data.df)
     for (model, sl) in (("marginal", :common), ("marginal", :cluster), ("gaussian", :cluster)), rb in (true, false)

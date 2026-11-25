@@ -58,7 +58,8 @@ InputData(; y=ScaleData(a=[0.0]), d=[0], lower=[0.0], upper=[0.0], Hmat=sparse([
 ## did not improve mixing). `hierarchical` makes Design A's cluster intercepts hierarchical,
 ## a_j ~ N(m, diag(tau2)) with m and tau2 drawn every sweep (Phase 4d). `ridge_block` replaces the
 ## Sigma update of the marginal and gaussian samplers with the joint (outcome coefficients,
-## sigma12, sigma13) draw and Omega = Var(y1, y0 | d*) (Phase 4f).
+## sigma12, sigma13) draw and Omega = Var(y1, y0 | d*) (Phase 4f; off by default: valid, but no
+## mixing gain).
 mutable struct InputParams
     M::Int64
     scale_data::Tuple{Bool,Bool}
@@ -81,7 +82,7 @@ mutable struct InputParams
 end
 
 InputParams(; M=100, scale_data=(false,false), verbose=true, model="dpm", thin=1, latent_thin=0, slopes=:common,
-            label_step=:r2, sigma23_step=false, hierarchical=true, ridge_block=true) =
+            label_step=:r2, sigma23_step=false, hierarchical=true, ridge_block=false) =
     InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step, sigma23_step, hierarchical, ridge_block)
 ## set default model to dpm
 InputParams(m, s, v) = InputParams(M=m, scale_data=s, verbose=v, model="dpm")

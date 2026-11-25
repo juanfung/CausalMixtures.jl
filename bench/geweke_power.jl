@@ -8,13 +8,13 @@
 # hier_shape_k, hier_pred_fixed (Phase 4d, hierarchical intercepts);
 # ridge_omega_noprior, ridge_separate, ridge_wrong_nu (Phase 4f, ridge block);
 # latent_c0y_flip, latent_trunc_side (the latent refresh; testable since the harness runs it first).
-# The r3_* bugs run with R3 on. CM_RIDGE=0 runs with the ridge block off.
+# The r3_* bugs run with R3 on. CM_RIDGE=1 runs with the ridge block on (the ridge_* bugs turn it on).
 include(joinpath(@__DIR__, "..", "test", "GewekeHarness.jl")); using .GewekeHarness
 using CausalMixtures, Random, LinearAlgebra
 const CM = CausalMixtures
 bug = ARGS[1]
 GewekeHarness.R3[] = startswith(bug, "r3_")
-GewekeHarness.RIDGE[] = get(ENV, "CM_RIDGE", "1") == "1"
+GewekeHarness.RIDGE[] = startswith(bug, "ridge_") || get(ENV, "CM_RIDGE", "0") == "1"
 M_sc = length(ARGS) > 1 ? parse(Int, ARGS[2]) : 50_000
 M_mc = length(ARGS) > 2 ? parse(Int, ARGS[3]) : 100_000
 if bug == "sigma_dof"      # Sigma_j ~ NobileWishart(rho + n_j + 1, ...)

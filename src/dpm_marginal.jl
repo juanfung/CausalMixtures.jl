@@ -22,9 +22,9 @@
 ##        incrementally as units move.
 ##  (ii)  beta^c_j | Sigma_j, z, b ~ N(Q_j^-1 r_j, Q_j^-1)
 ##  (iii) b | everything (:common only), accumulated per cluster with Sigma_j^-1 weights
-##  (iv)  ridge_block = true (default, Phase 4f, src/ridge_block.jl): per cluster, the outcome
+##  (iv)  ridge_block = true (option, off by default; Phase 4f, src/ridge_block.jl): per cluster, the outcome
 ##        coefficients and delta = (sigma12, sigma13) jointly | Omega, then Omega = Var(y1, y0 | d*);
-##        ridge_block = false: Sigma_j ~ NobileWishart(rho + n_j, rho R + sum e e')
+##        ridge_block = false (default): Sigma_j ~ NobileWishart(rho + n_j, rho R + sum e e')
 ##  (iv') R3 (sigma23_step = true, Phase 4c): sigma23_j from its prior conditional (y_miss
 ##        integrated out, the likelihood does not involve sigma23), by slice sampling, then
 ##        y_miss of j's members redrawn (update_sigma23!)
