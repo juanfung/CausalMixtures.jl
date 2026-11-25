@@ -28,6 +28,8 @@ A named tuple containing:
 - `true_params::NamedTuple`: True DGP parameters used
 - `formulas::NamedTuple`: StatsModels formulas for outcome and selection equations
 - `design_info::NamedTuple`: Additional information about the design
+**Legacy** (Phase 6): kept for old scripts and tests. Use `simulate_selection` for new work
+(scenarios, sample and population truth, controllable R² and instrument strength).
 """
 function generate_hedonic_data(n::Int, seed::Int;
                               gamma::Vector{Float64} = [-1.0, 1.0, 1.0],
