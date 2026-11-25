@@ -64,6 +64,7 @@ include("dpm_ppd.jl")
 
 ## multi-chain diagnostics
 include("diagnostics.jl")
+include("effects.jl")
 
 ## prior predictive simulation (prior calibration)
 include("prior_predictive.jl")
