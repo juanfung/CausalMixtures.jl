@@ -17,8 +17,15 @@ the companion review page.
 | 0 · Baseline | ✅ Done |
 | 1 · Local fixes | ✅ Done, plus follow-ups (`dpm_ppd` by name, `acf_var`, `testdpm_init`) |
 | 2 · Priors | ✅ Analysis done (`docs/priors.md`). **C3 adopted**; switching the defaults is the first task of Phase 3. |
-| 3 · Refactor | ▶ Next |
-| 4–7 | Not started |
+| 3 · Refactor | ✅ Done. C3 is the default; posteriors match before and after (max \|z\| 1.11 over 31 comparisons). `blocked` is 14× faster with 19× fewer allocations; `dpm` 2.8× (still dominated by bug 2). Suite 1508/1508. About 1 chain in 8 gets stuck in a low-ATE mode, both before and after. |
+| 4a · Design A core + Geweke harness | ✅ Done. **Geweke:** passes in both slope modes (max \|z\| 2.09 `:common`, 2.42 `:cluster`, 500k sweeps); three planted bugs each gave \|z\| of 10–38. **Agreement:** matches `gaussian` when $k=1$ and agrees with `blocked` on ATE. **Problems found:** `blocked` is unreliable for $k$ (chains drift; R-hat 1.32 on $k$); ATE ESS is only about 150–200 per 16,000 draws for every sampler, `gaussian` included; 1 `:common` chain in 8 sticks in a low-ATE mode. **Speed:** 2.2 s per 1000 iterations, against 0.39 s for `blocked`. |
+| 4b · R2 joint label/latent step | ✅ Done. **Formula fix:** the selection-index shift $g_i$ was missing; the Geweke test caught it (\|z\| 62). **Geweke:** passes (max \|z\| 1.98 `:common`, 2.11 `:cluster`); six planted bugs give \|z\| of 7–62. **Mixing:** ATE ESS up 1.8× (`:common`) and 3.8× (`:cluster`), and R-hat for $k$ is 1.000–1.001; no chain got stuck in this run. **Speed:** 0.96 s per 1000 iterations (`:common`) and 1.14 s (`:cluster`), against 0.41 s for `blocked`. |
+| 4c · R3 collapsed $\sigma_{23}$ step | ✅ Done, but **no mixing gain**. **Correctness:** unit tests and Geweke pass (1.50 / 1.95 / 2.13). **Mixing:** ATE ESS is unchanged; $\sigma_{23}$ is pinned near $\sigma_{12}\sigma_{13}$ (posterior sd 0.010), so it isn't the bottleneck. The step defaults to off and is kept for the $\sigma_{23}$ sensitivity tool. **Lesson:** the coordinator's two "must fail" planted bugs were actually valid samplers: the augmented-posterior target is the ordinary Gibbs conditional, and the latent refresh redraws $y_{\text{miss}}$ anyway. |
+| 4d · Hierarchical intercepts + separated-units diagnostic | ✅ Done. Hierarchical prior on by default. **Geweke:** passes (max \|z\| 2.12 `:common`, 2.88 `:cluster`); both planted bugs fail hard (\|z\| 33–94). **Effect on these data:** negligible (ATE ≤ 0.035, $k$ ≤ 0.09, separated share 0–0.2%); with $k\approx1$–1.4 there is little to pool over. **Watch item:** the two-component ATE is 5.42–5.50 against a sample ATE of 4.92 (about 1.2 sd high); Phase 6 coverage runs should check this. |
+| 4e · Mixing diagnosis | ✅ Done. **Bottleneck:** one ridge per outcome arm, between the intercept and $\sigma_{1k}=\mathrm{Cov}(v,u_k)$ ($\|r\|$ 0.75–0.97). Given $d^*$, $y_k=\mathbf x'\beta_k+\sigma_{1k}(d^*-\mathbf w'\gamma)+e$; the selection residual's mean is nearly constant within an arm, so drawing β given Σ and then Σ given β zig-zags along the ridge. **Severity tracks instrument strength:** ESS is 5–9 per 1000 draws with a weak instrument. **Everything else mixes 10–50× faster:** $\gamma$, $d^*$, $y_{\text{miss}}$, $k$, $\alpha$, $\mathbf m$ and $\tau^2$. |
+| 4f · Fix the ridge | ▶ In progress: **option A**, a joint complete-data draw of the outcome coefficients and $\boldsymbol\delta=(\sigma_{12},\sigma_{13})$ given $\Omega=\mathrm{Cov}(u\mid v)$, then $\Omega$ from its inverse-Wishart. **Fallback:** C, ASIS interweaving. **Kept on the roadmap:** B, the per-arm joint draw with $y_{\text{miss}}$ integrated out; revisit it after A. |
+| Review of 4a–4e code | ✅ Done. **Sampler:** no correctness bugs found in Design A. **Harness gap (confirmed):** the Geweke harness overwrites the latent data at the start of each iteration, so the sweep's final latent refresh and R3's redraw were never tested, in any sampler. Fix: run the latent refresh first, add planted latent-step bugs, and re-run the long Geweke tests. **Also fixed as part of 4f:** cluster-slope statistics under `:cluster`, the repo copy of this plan, and `setup_default_priors` defaulting to `:common`, plus minor cleanups. |
+| 5–7 | Not started |
 
 ## 00 Ground rules for the coding session
 
@@ -161,17 +168,23 @@ these from Σ-free cross-products using the block identity on the review page (�
 
    For an auxiliary cluster, use $\mu_c$ and $V_c$ in place of the cluster posterior.
 
-   (c) Score only the *observed* data. Let $o=2$ if $d_i=1$ and $o=3$ if $d_i=0$, and
-   $s_i=2d_i-1$. Then
+   (c) Score only the *observed* data. Let $o=2$ if $d_i=1$ and $o=3$ if $d_i=0$, let
+   $s_i=2d_i-1$, and let $g_i=(H^g_ib)_d=\tilde{\mathbf w}_i'\tilde\gamma$ be the global part of
+   the selection index ($g_i=0$ under `:cluster`). Then
 
-   $$\log p_j=\log N(\tilde y_i\mid\mu_o,S_{oo})+\log\Phi\!\Big(s_i\,\frac{\mu_d+S_{do}S_{oo}^{-1}(\tilde y_i-\mu_o)}{\sqrt{S_{dd}-S_{do}^2/S_{oo}}}\Big).$$
+   $$\log p_j=\log N(\tilde y_i\mid\mu_o,S_{oo})+\log\Phi\!\Big(s_i\,\frac{\mu_d+g_i+S_{do}S_{oo}^{-1}(\tilde y_i-\mu_o)}{\sqrt{S_{dd}-S_{do}^2/S_{oo}}}\Big).$$
+
+   *Corrected in Phase 4b.* On the shifted scale $\tilde z_d=d^*-g_i$, treatment means
+   $\tilde z_d>-g_i$, not $\tilde z_d>0$. The original formula omitted $g_i$; the Geweke test
+   caught it under `:common` (\|z\| = 62 before the fix, 1.8 after).
 
    Add $\log n_{-i,j}$ for an existing cluster, or $\log(\alpha/m)$ for an auxiliary one. Here
    $\tilde y_i$ is the observed outcome minus its global part.
 
-   (d) Sample $c_i$ with log-sum-exp. Then draw $d_i^*$ from the truncated normal conditional on
-   $\tilde y_i$, and $y_{\text{miss},i}$ from the predictive conditional on $(d^*_i,\tilde y_i)$.
-   Add $i$'s statistics to its new cluster.
+   (d) Sample $c_i$ with log-sum-exp. Then draw $\tilde z_{d,i}$ from its normal conditional on
+   $\tilde y_i$, truncated at $-g_i$ (above it if $d_i=1$, below it otherwise), which is the same
+   as drawing $d_i^*$ truncated at 0. Then draw $y_{\text{miss},i}$ from the predictive
+   conditional on $(d^*_i,\tilde y_i)$. Add $i$'s statistics to its new cluster.
 
 2. **Cluster coefficients:** $\beta^c_j\sim N(Q_j^{-1}\mathbf r_j,\ Q_j^{-1})$.
 3. **Global slopes** (`:common` only): $b\sim N(P^{-1}\mathbf s,P^{-1})$ with
