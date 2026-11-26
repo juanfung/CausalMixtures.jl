@@ -214,7 +214,7 @@ function update_theta!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, j
     U = [dot(ed, ed) dot(ed, e1) dot(ed, e0);
          dot(e1, ed) dot(e1, e1) dot(e1, e0);
          dot(e0, ed) dot(e0, e1) dot(e0, e0)]
-    U .+= p.prior_Sigma.rho .* p.prior_Sigma.R
+    U .+= p.prior_Sigma.rho .* sigma_R(state, input)
     Sigma_j = sigma ? NobileWishart(rng, (nj + p.prior_Sigma.rho), U ) : state.state_theta[j].Sigma
 
     ## 2. beta ~ N(vj (H_j'(Sinv ⊗ I) z_j + V mu), vj), vj = (H_j'(Sinv ⊗ I)H_j + V)^-1
@@ -319,6 +319,7 @@ function prepare_out!(out::GibbsOut, params::InputParams)
     resize!(out.out_theta, params.M ÷ params.thin)
     resize!(out.out_hyper, params.M ÷ params.thin)
     resize!(out.out_sep, params.M ÷ params.thin)
+    resize!(out.out_r, params.M ÷ params.thin)
     resize!(out.out_data, nl)
     resize!(out.out_labels, nl)
     return out
@@ -347,6 +348,7 @@ function update_out!(state::GibbsState, out::GibbsOut, m::Int64, input::GibbsInp
         out.out_theta[s] = copy(state.state_theta)
         out.out_hyper[s] = vcat(state.state_hyper.m, state.state_hyper.tau2)
         out.out_sep[s] = separated_share(state.state_dp, input.data.d)
+        out.out_r[s] = copy(state.state_hyper.r)
     end
     if out.latent_thin > 0 && m % out.latent_thin == 0
         s = m ÷ out.latent_thin
@@ -360,6 +362,40 @@ end
 function update_sampler!(state::GibbsState, M::Int64)
     state.state_sampler.chain = true
     state.state_sampler.batch_m += M
+    return state
+end
+
+## --------------------------------------------------------------------------- #
+## The Sigma scale (Phase 6a'). Sigma_j ~ NobileWishart(rho, rho R), R = diag(1/rho, r1, r0). With
+## sigma_scale = :hier, r = (r1, r0) is learned: in the (delta, Omega) form of Phase 4f, delta_j |
+## Omega_j ~ N(0, Omega_j) does not involve r, and Omega_j ~ IW_2(rho, diag(rho r1, rho r0)) gives,
+## per occupied cluster, r_k^{rho/2} exp(-rho r_k (Omega_j^-1)_kk / 2) (the prior is a product of
+## normalized densities, so no other r-dependent constant enters). With r_k ~ Gamma(a_r, b_r)
+## (shape, rate) and K occupied clusters:
+##   r_k | Omega_1..Omega_K ~ Gamma(a_r + K rho/2, b_r + (rho/2) sum_j (Omega_j^-1)_kk).
+
+## the current R: the prior's, or diag(1/rho, r1, r0) with the state's r under sigma_scale = :hier
+function sigma_R(state::GibbsState, input::GibbsInput)
+    R = input.priors.prior_theta.prior_Sigma.R
+    (input.params.sigma_scale == :hier && length(state.state_hyper.r) == 2) || return R
+    Rc = copy(R)
+    Rc[2, 2], Rc[3, 3] = state.state_hyper.r[1], state.state_hyper.r[2]
+    return Rc
+end
+
+## r | the occupied clusters' Omega_j
+function update_sigma_scale!(rng::AbstractRNG, state::GibbsState, input::GibbsInput)
+    rho = input.priors.prior_theta.prior_Sigma.rho
+    a, b = input.params.r_shape, input.params.r_rate
+    occ = [j for j in eachindex(state.state_dp.njs) if state.state_dp.njs[j] > 0]
+    K = length(occ)
+    s = zeros(2)
+    for j in occ
+        _, O = sigma_delta_omega(state.state_theta[j].Sigma)
+        Oi = inv(Symmetric(O))
+        s[1] += Oi[1, 1]; s[2] += Oi[2, 2]
+    end
+    state.state_hyper.r = [rand(rng, Gamma(a + K * rho / 2, 1 / (b + rho / 2 * s[k]))) for k in 1:2]
     return state
 end
 
@@ -417,7 +453,7 @@ function update_sigma23!(rng::AbstractRNG, state::GibbsState, input::GibbsInput,
     ps = input.priors.prior_theta.prior_Sigma
     th = state.state_theta[j]
     S = copy(th.Sigma)
-    S[2, 3] = S[3, 2] = slice_sigma23(rng, S, ps.rho .* ps.R, ps.rho)
+    S[2, 3] = S[3, 2] = slice_sigma23(rng, S, ps.rho .* sigma_R(state, input), ps.rho)
     state.state_theta[j] = Theta(beta=th.beta, Sigma=S)
     return update_ymiss_only!(rng, state, input, j, idx)
 end
@@ -441,11 +477,14 @@ function update_gaussian_params!(rng::AbstractRNG, state::GibbsState, input::Gib
     else
         state = update_theta!(rng, state, input, 1, idx)
     end
-    latent_first && return state
-    ## R3: collapsed sigma23 step (and y_miss redraw)
-    input.params.sigma23_step && update_sigma23!(rng, state, input, 1, idx)
-    ## update latent data
-    state = update_latent!(rng, state, input, 1, idx)
+    if !latent_first
+        ## R3: collapsed sigma23 step (and y_miss redraw)
+        input.params.sigma23_step && update_sigma23!(rng, state, input, 1, idx)
+        ## update latent data
+        state = update_latent!(rng, state, input, 1, idx)
+    end
+    ## the learned Sigma scale (Phase 6a')
+    input.params.sigma_scale == :hier && update_sigma_scale!(rng, state, input)
     return state
 end
 

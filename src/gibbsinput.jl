@@ -59,7 +59,9 @@ InputData(; y=ScaleData(a=[0.0]), d=[0], lower=[0.0], upper=[0.0], Hmat=sparse([
 ## a_j ~ N(m, diag(tau2)) with m and tau2 drawn every sweep (Phase 4d). `ridge_block` replaces the
 ## Sigma update of the marginal and gaussian samplers with the joint (outcome coefficients,
 ## sigma12, sigma13) draw and Omega = Var(y1, y0 | d*) (Phase 4f; off by default: valid, but no
-## mixing gain).
+## mixing gain). `sigma_scale` (Phase 6a'): `:fixed` uses the priors' Sigma scale R (C3, or
+## setup_default_priors(raw; r = :auto)); `:hier` learns r = (r1, r0) of R = diag(1/rho, r1, r0)
+## with r_k ~ Gamma(`r_shape`, rate `r_rate`) (default mean 0.153, C3's value, shape 2).
 mutable struct InputParams
     M::Int64
     scale_data::Tuple{Bool,Bool}
@@ -72,18 +74,27 @@ mutable struct InputParams
     sigma23_step::Bool
     hierarchical::Bool
     ridge_block::Bool
-    function InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step, sigma23_step, hierarchical, ridge_block)
+    sigma_scale::Symbol
+    r_shape::Float64
+    r_rate::Float64
+    function InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step, sigma23_step, hierarchical, ridge_block,
+                         sigma_scale, r_shape, r_rate)
         thin >= 1 || throw(ArgumentError("thin must be >= 1, got $thin"))
         latent_thin >= 0 || throw(ArgumentError("latent_thin must be >= 0, got $latent_thin"))
         slopes in (:common, :cluster) || throw(ArgumentError("slopes must be :common or :cluster, got $slopes"))
         label_step in (:r2, :augmented) || throw(ArgumentError("label_step must be :r2 or :augmented, got $label_step"))
-        return new(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step, sigma23_step, hierarchical, ridge_block)
+        sigma_scale in (:fixed, :hier) || throw(ArgumentError("sigma_scale must be :fixed or :hier, got $sigma_scale"))
+        r_shape > 0 && r_rate > 0 || throw(ArgumentError("r_shape and r_rate must be positive"))
+        return new(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step, sigma23_step, hierarchical, ridge_block,
+                   sigma_scale, r_shape, r_rate)
     end
 end
 
 InputParams(; M=100, scale_data=(false,false), verbose=true, model="dpm", thin=1, latent_thin=0, slopes=:common,
-            label_step=:r2, sigma23_step=false, hierarchical=true, ridge_block=false) =
-    InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step, sigma23_step, hierarchical, ridge_block)
+            label_step=:r2, sigma23_step=false, hierarchical=true, ridge_block=false,
+            sigma_scale=:fixed, r_shape=2.0, r_rate=2 / 0.153) =
+    InputParams(M, scale_data, verbose, model, thin, latent_thin, slopes, label_step, sigma23_step, hierarchical, ridge_block,
+                sigma_scale, Float64(r_shape), Float64(r_rate))
 ## set default model to dpm
 InputParams(m, s, v) = InputParams(M=m, scale_data=s, verbose=v, model="dpm")
 

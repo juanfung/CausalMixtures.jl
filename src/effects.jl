@@ -74,6 +74,15 @@ function draw_weights(rng::AbstractRNG, njs::AbstractVector{<:Integer}, alpha::R
     end
 end
 
+## R of saved draw s: diag(1/rho, r1, r0) with the draw's learned r (sigma_scale = :hier), or the prior's R
+function draw_R(out::GibbsOut, input::GibbsInput, s::Integer)
+    R = input.priors.prior_theta.prior_Sigma.R
+    (isassigned(out.out_r, s) && length(out.out_r[s]) == 2) || return R
+    Rc = copy(R)
+    Rc[2, 2], Rc[3, 3] = out.out_r[s][1], out.out_r[s][2]
+    return Rc
+end
+
 ## the components (beta, Sigma) and weights of saved draw s
 function draw_mixture(rng::AbstractRNG, out::GibbsOut, input::GibbsInput, s::Integer, D, G0Sigma::NobileFactor;
                       n_g0::Integer=20, weights::Symbol=:dirichlet)
@@ -151,7 +160,8 @@ function effects(out::GibbsOut, input::GibbsInput; rng::AbstractRNG=Random.defau
     pate, patt, patu = zeros(length(keep)), zeros(length(keep)), zeros(length(keep))
     xbar = vec(mean(X, dims=1))
     for (t, s) in enumerate(keep)
-        betas, Sigmas, pis = draw_mixture(rng, out, input, s, D, G0S; n_g0=n_g0, weights=weights)
+        G0s = isassigned(out.out_r, s) && length(out.out_r[s]) == 2 ? NobileFactor(ps.rho .* draw_R(out, input, s)) : G0S
+        betas, Sigmas, pis = draw_mixture(rng, out, input, s, D, G0s; n_g0=n_g0, weights=weights)
         pate[t] = sy * sum(pis[j] * dot(xbar, betas[j][kz+1:kz+kx] - betas[j][kz+kx+1:end]) for j in eachindex(pis))
         at, au = 0.0, 0.0
         for i in tr

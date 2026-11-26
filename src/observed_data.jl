@@ -146,6 +146,7 @@ function obsdata_out(draws::AbstractMatrix{Float64}, input::GibbsInput)
         out.out_dp[s] = DrawDP(1, [input.dims.n], BlockedWeights[], 0.0, 0.0)
         out.out_hyper[s] = Float64[]
         out.out_sep[s] = 0.0
+        out.out_r[s] = Float64[]
     end
     return out
 end

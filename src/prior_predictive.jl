@@ -23,6 +23,8 @@ and outcome slopes are independent N(0, sd^2); the selection-equation intercept 
 at `alpha` when `alpha_shape == 0`, and otherwise alpha ~ Gamma(alpha_shape, rate = alpha_rate).
 `hierarchical = true` (Phase 4d): the cluster intercepts a_j = (a_d, a_1, a_0) ~ N(m, diag(tau2)) with
 m ~ N(0, diag(v)) and tau2_l ~ IG(3, 2 v_l), v = (sd_intercept_d^2, sd_intercept^2, sd_intercept^2).
+`r_shape > 0` (Phase 6a'): the Sigma scale is learned, r_k ~ Gamma(r_shape, rate r_rate) once per
+draw, R = diag(1/rho, r1, r0).
 """
 struct PriorSpec
     name::String
@@ -37,15 +39,18 @@ struct PriorSpec
     alpha_shape::Float64
     alpha_rate::Float64
     hierarchical::Bool
+    r_shape::Float64
+    r_rate::Float64
 end
 
 function PriorSpec(; name::String="", slopes::Symbol=:cluster, sd_intercept::Real=1.0,
                    sd_intercept_d::Real=sd_intercept, sd_probit::Real=1.0, sd_outcome::Real=1.0, rho::Integer=6, r::Real=2.0,
                    R::AbstractMatrix=Matrix(Diagonal([1/rho, r, r])), alpha::Real=1.0,
-                   alpha_shape::Real=0.0, alpha_rate::Real=0.0, hierarchical::Bool=false)
+                   alpha_shape::Real=0.0, alpha_rate::Real=0.0, hierarchical::Bool=false,
+                   r_shape::Real=0.0, r_rate::Real=0.0)
     slopes in (:cluster, :common) || throw(ArgumentError("slopes must be :cluster or :common"))
     return PriorSpec(name, slopes, sd_intercept, sd_intercept_d, sd_probit, sd_outcome, rho, Matrix{Float64}(R),
-                     alpha, alpha_shape, alpha_rate, hierarchical)
+                     alpha, alpha_shape, alpha_rate, hierarchical, r_shape, r_rate)
 end
 
 ## copy of a spec with some fields changed
@@ -53,7 +58,8 @@ function PriorSpec(s::PriorSpec; kw...)
     f = merge((name=s.name, slopes=s.slopes, sd_intercept=s.sd_intercept,
                sd_intercept_d=s.sd_intercept_d, sd_probit=s.sd_probit,
                sd_outcome=s.sd_outcome, rho=s.rho, R=s.R, alpha=s.alpha,
-               alpha_shape=s.alpha_shape, alpha_rate=s.alpha_rate, hierarchical=s.hierarchical), values(kw))
+               alpha_shape=s.alpha_shape, alpha_rate=s.alpha_rate, hierarchical=s.hierarchical,
+               r_shape=s.r_shape, r_rate=s.r_rate), values(kw))
     return PriorSpec(; f...)
 end
 
@@ -126,9 +132,16 @@ function prior_draw(s::PriorSpec, X::AbstractMatrix, W::AbstractMatrix;
     n, kx = size(X)
     kw = size(W, 2)
     size(W, 1) == n || throw(DimensionMismatch("X and W must have the same number of rows"))
-    rhoR = s.rho * s.R
     slopes(sd, k) = sd .* randn(rng, k)
     alpha = _draw_alpha(rng, s)
+    ## the Sigma scale: fixed, or learned (one r per draw)
+    if s.r_shape > 0
+        rr = [rand(rng, Gamma(s.r_shape, 1 / s.r_rate)) for _ in 1:2]
+        Rd = copy(s.R); Rd[2, 2], Rd[3, 3] = rr[1], rr[2]
+    else
+        rr, Rd = Float64[], s.R
+    end
+    rhoR = s.rho * Rd
     if partition == :crp
         labels, counts = _crp(rng, n, alpha)
     elseif partition == :stick
@@ -177,7 +190,8 @@ function prior_draw(s::PriorSpec, X::AbstractMatrix, W::AbstractMatrix;
     d = Int.(z[:, 1] .> 0)
     y = ifelse.(d .== 1, z[:, 2], z[:, 3])
     return (alpha=alpha, labels=labels, counts=counts, gam=gam, b1=b1, b0=b0, Sigma=Sigma,
-            slopes=shared, z=z, d=d, y=y, m = s.hierarchical ? m : Float64[], tau2 = s.hierarchical ? tau2 : Float64[])
+            slopes=shared, z=z, d=d, y=y, m = s.hierarchical ? m : Float64[], tau2 = s.hierarchical ? tau2 : Float64[],
+            r=rr)
 end
 
 """

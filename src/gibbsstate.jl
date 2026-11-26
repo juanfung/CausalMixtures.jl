@@ -131,14 +131,16 @@ StateSampler(; chain=false, batch_n=1, batch_m=0, batch_1=1, Vmu=[0.0], zdenom=0
     StateSampler(chain, batch_n, batch_m, batch_1, Vmu, zdenom)
 
 ## hyperparameters of the hierarchical cluster intercepts (Design A, hierarchical = true, Phase
-## 4d): a_j ~ N(m, diag(tau2)), a_j = (a_d, a_1, a_0); both vectors empty when not in use
+## 4d): a_j ~ N(m, diag(tau2)), a_j = (a_d, a_1, a_0); and the Sigma scale r = (r1, r0) of
+## R = diag(1/rho, r1, r0) when it is learned (sigma_scale = :hier, Phase 6a'); empty when not in use
 mutable struct StateHyper
     m::Vector{Float64}
     tau2::Vector{Float64}
+    r::Vector{Float64}
 end
 
-StateHyper(; m=Float64[], tau2=Float64[]) = StateHyper(m, tau2)
-Base.copy(h::StateHyper) = StateHyper(copy(h.m), copy(h.tau2))
+StateHyper(; m=Float64[], tau2=Float64[], r=Float64[]) = StateHyper(m, tau2, r)
+Base.copy(h::StateHyper) = StateHyper(copy(h.m), copy(h.tau2), copy(h.r))
 
 ## current state
 mutable struct GibbsState

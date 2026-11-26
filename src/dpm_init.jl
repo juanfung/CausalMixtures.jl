@@ -189,6 +189,13 @@ function dpm_init(data::RawData, priors::InputPriors, params::InputParams; xmats
     else
         state_hyper = StateHyper()
     end
+    ## the learned Sigma scale starts at the priors' r (Phase 6a')
+    if params.sigma_scale == :hier
+        model in ("marginal", "gaussian") || throw(ArgumentError("sigma_scale = :hier is implemented for the marginal and gaussian samplers"))
+        Rp = priors.prior_theta.prior_Sigma.R
+        maximum(abs, Rp - Diagonal(diag(Rp))) == 0 || throw(ArgumentError("sigma_scale = :hier needs a diagonal R"))
+        state_hyper.r = [Rp[2, 2], Rp[3, 3]]
+    end
     
     ## 2d. collect sampler state parameters
     ## pre-compute constant factors for sampler
@@ -234,6 +241,7 @@ function dpm_chain!(state::GibbsState, input::GibbsInput, out::GibbsOut; test=fa
     append!(out.out_labels, out_new.out_labels)
     append!(out.out_hyper, out_new.out_hyper)
     append!(out.out_sep, out_new.out_sep)
+    append!(out.out_r, out_new.out_r)
     return (state, input, out)
 end
 

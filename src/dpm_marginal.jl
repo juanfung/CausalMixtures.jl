@@ -30,6 +30,8 @@
 ##        y_miss of j's members redrawn (update_sigma23!)
 ##  (v)   latent data: the y_miss and d* conditionals of update_latent!
 ##  (vi)  alpha: Escobar-West with the random indicator (update_alpha!)
+##  (viii) sigma_scale = :hier (Phase 6a'): the Sigma scale r = (r1, r0) | the clusters' Omega_j
+##        (update_sigma_scale!), used by the label step's auxiliary draws and the Sigma update.
 ##  (vii) hierarchical = true (Phase 4d): the cluster intercepts a_j = (a_d, a_1, a_0)_j have prior
 ##        N(m, diag(tau2)), which is the intercept block of the beta^c prior in (i)-(ii) (the
 ##        auxiliary predictives included; the slopes keep their fixed prior); m | a, tau2 and
@@ -416,7 +418,7 @@ function update_marginal_labels!(rng::AbstractRNG, state::GibbsState, input::Gib
                                  r2::Bool = input.params.label_step == :r2)
     dp = state.state_dp
     ps = input.priors.prior_theta.prior_Sigma
-    G0 = NobileFactor(ps.rho .* ps.R)
+    G0 = NobileFactor(ps.rho .* sigma_R(state, input))   # the current Sigma scale (Phase 6a')
     b = global_slopes(state, D)
     K = length(dp.njs)
     sd = state.state_data
@@ -579,7 +581,7 @@ function update_marginal_sigmas!(rng::AbstractRNG, state::GibbsState, input::Gib
     sd = state.state_data
     for j in 1:state.state_dp.J
         th = state.state_theta[j]
-        U = ps.rho .* ps.R
+        U = ps.rho .* sigma_R(state, input)
         for i in state.state_dp.members[j]
             md, m1, m0 = unit_mean(X, W, th.beta, i)
             e = (sd.dstar[i] - md, sd.y1[i] - m1, sd.y0[i] - m0)
@@ -626,6 +628,7 @@ function marginal_sweep!(rng::AbstractRNG, state::GibbsState, input::GibbsInput,
         update_alpha!(rng, state, input)
     end
     D.hier && update_hyper!(rng, state, D)               # (vii) m, tau2
+    input.params.sigma_scale == :hier && update_sigma_scale!(rng, state, input)   # (viii) r (Phase 6a')
     return state
 end
 
@@ -657,7 +660,6 @@ end
 function rand_marginal(rng::AbstractRNG, out::GibbsOut, input::GibbsInput, hnew::SparseMatrixCSC{Float64,Int64})
     D = DesignA(input)
     ps = input.priors.prior_theta.prior_Sigma
-    rhoR = ps.rho .* ps.R
     ynew = Matrix{Float64}(undef, 3, length(out.out_dp))
     for m in eachindex(out.out_dp)
         dp, th = out.out_dp[m], out.out_theta[m]
@@ -672,7 +674,7 @@ function rand_marginal(rng::AbstractRNG, out::GibbsOut, input::GibbsInput, hnew:
             end
             ## a new cluster: beta^c from its prior, the shared b from the draw, Sigma from G0
             beta = full_beta(D, D.mu_c + D.Lc * randn(rng, length(D.mu_c)), th[1].beta[D.gidx])
-            Sigma = NobileWishart(rng, ps.rho, rhoR)
+            Sigma = NobileWishart(rng, ps.rho, ps.rho .* draw_R(out, input, m))   # the draw's Sigma scale
         end
         ynew[:, m] = hnew * beta + cholesky(Symmetric(Sigma)).L * randn(rng, 3)
     end

@@ -151,7 +151,7 @@ function update_gaussian_ridge!(rng::AbstractRNG, state::GibbsState, input::Gibb
     pb = input.priors.prior_theta.prior_beta
     th = state.state_theta[1]
     sd = state.state_data
-    rp = RidgePrior(input.priors.prior_theta.prior_Sigma)
+    rp = RidgePrior(PriorSigma(input.priors.prior_theta.prior_Sigma.rho, sigma_R(state, input)))
     beta, Sigma = ridge_draw(rng, 1:input.dims.n, i -> unit_z(sd, i), input.data.W, input.data.X,
                              th.beta, pb.mu, pb.Vcov, th.Sigma, rp)
     state.state_theta[1] = Theta(beta=beta, Sigma=Sigma)
@@ -161,7 +161,7 @@ end
 ## the ridge block for Design A: every cluster, on z~ = z - H^g b, the prior of beta^c from D
 function update_marginal_ridge!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, D) # D::DesignA
     b = global_slopes(state, D)
-    rp = RidgePrior(input.priors.prior_theta.prior_Sigma)
+    rp = RidgePrior(PriorSigma(input.priors.prior_theta.prior_Sigma.rho, sigma_R(state, input)))
     for j in 1:state.state_dp.J
         idx = state.state_dp.members[j]
         th = state.state_theta[j]
