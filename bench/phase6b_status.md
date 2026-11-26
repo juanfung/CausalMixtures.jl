@@ -1,5 +1,10 @@
 # Phase 6b status: tier 1 coverage run
 
+**Progress:**
+- **n = 2000:** done 2026-11-26 18:39 (8.6 h; 800/800 reps, no failures). Results are in
+  `bench/coverage_tier1_n2000_summary.md`, and the coordinator was messaged.
+- **n = 500:** started 18:39, estimated at about 2 h.
+
 A handoff note, so a fresh session can pick the run up.
 
 **What runs:** `bench/phase6b_run.sh`, launched 2026-11-26 under `caffeinate -ims` (the Mac must stay
