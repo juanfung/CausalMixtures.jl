@@ -42,6 +42,7 @@ result = @testset "CausalMixtures.jl Tests" begin
     include("test_observed_data.jl")
     include("test_simulate_selection.jl")
     include("test_auto_scale.jl")
+    include("test_sigma_scale.jl")
     include("test_geweke.jl")  # smoke; CM_GEWEKE=1 for the long runs
 
     # Phase 3 state refactor
