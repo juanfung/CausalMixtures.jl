@@ -7,7 +7,8 @@
 # R3 is off by default since 4d, so these need sigma23_step = true to have an effect);
 # hier_shape_k, hier_pred_fixed (Phase 4d, hierarchical intercepts);
 # ridge_omega_noprior, ridge_separate, ridge_wrong_nu (Phase 4f, ridge block);
-# latent_c0y_flip, latent_trunc_side (the latent refresh; testable since the harness runs it first).
+# latent_c0y_flip, latent_trunc_side (the latent refresh; testable since the harness runs it first);
+# hierr_shape_Krho, hierr_aux_fixed (Phase 6a', learned Sigma scale; CM_HIERR=1 is set for these).
 # The r3_* bugs run with R3 on. CM_RIDGE=1 runs with the ridge block on (the ridge_* bugs turn it on).
 include(joinpath(@__DIR__, "..", "test", "GewekeHarness.jl")); using .GewekeHarness
 using CausalMixtures, Random, LinearAlgebra
@@ -15,6 +16,7 @@ const CM = CausalMixtures
 bug = ARGS[1]
 GewekeHarness.R3[] = startswith(bug, "r3_")
 GewekeHarness.RIDGE[] = startswith(bug, "ridge_") || get(ENV, "CM_RIDGE", "0") == "1"
+GewekeHarness.HIERR[] = startswith(bug, "hierr_") || get(ENV, "CM_HIERR", "0") == "1"
 M_sc = length(ARGS) > 1 ? parse(Int, ARGS[2]) : 50_000
 M_mc = length(ARGS) > 2 ? parse(Int, ARGS[3]) : 100_000
 if bug == "sigma_dof"      # Sigma_j ~ NobileWishart(rho + n_j + 1, ...)
@@ -239,6 +241,39 @@ elseif bug == "latent_trunc_side"  # d* truncated to the wrong side of 0
             mu_d = md + (y1 - m1) * lm.sd1 + (y0 - m0) * lm.sd0
             sd.dstar[i] = rand(rng, d[i] == 1 ? truncated(Normal(mu_d, sdd), -Inf, 0.0) : truncated(Normal(mu_d, sdd), 0.0, Inf))
         end
+        return state
+    end
+end
+if bug == "hierr_shape_Krho"  # r_k | Omega with shape a_r + K rho instead of a_r + K rho / 2
+    @eval CM function update_sigma_scale!(rng::AbstractRNG, state::GibbsState, input::GibbsInput)
+        rho = input.priors.prior_theta.prior_Sigma.rho
+        a, b = input.params.r_shape, input.params.r_rate
+        occ = [j for j in eachindex(state.state_dp.njs) if state.state_dp.njs[j] > 0]
+        K = length(occ)
+        s = zeros(2)
+        for j in occ
+            Oi = inv(Symmetric(sigma_delta_omega(state.state_theta[j].Sigma)[2]))
+            s[1] += Oi[1, 1]; s[2] += Oi[2, 2]
+        end
+        state.state_hyper.r = [rand(rng, Gamma(a + K * rho, 1 / (b + rho / 2 * s[k]))) for k in 1:2]
+        return state
+    end
+elseif bug == "hierr_aux_fixed"  # the label step's auxiliary G0 draws use C3's fixed r, not the current r
+    @eval CM function marginal_sweep!(rng::AbstractRNG, state::GibbsState, input::GibbsInput, D::DesignA; test::Bool=false,
+                                      latent_first::Bool=false)
+        sync_hyper!(state, D)
+        latent_first && !test && marginal_latent!(rng, state, input)
+        r = state.state_hyper.r
+        state.state_hyper.r = [0.153, 0.153]        # only the label step sees C3's r
+        update_marginal_labels!(rng, state, input, D; r2 = input.params.label_step == :r2 && !test)
+        state.state_hyper.r = r
+        update_marginal_coefs!(rng, state, D)
+        update_global_slopes!(rng, state, D)
+        input.params.ridge_block ? update_marginal_ridge!(rng, state, input, D) : update_marginal_sigmas!(rng, state, input)
+        !latent_first && !test && marginal_latent!(rng, state, input)
+        input.priors.prior_dp.alpha_shape != 0.0 && update_alpha!(rng, state, input)
+        D.hier && update_hyper!(rng, state, D)
+        input.params.sigma_scale == :hier && update_sigma_scale!(rng, state, input)
         return state
     end
 end

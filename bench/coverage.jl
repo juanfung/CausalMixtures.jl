@@ -10,7 +10,9 @@
 #
 #   julia --project=. -t 8 bench/coverage.jl key=value ...
 # keys (comma-separated lists make a grid of cells):
-#   scenario=gaussian,mixture  n=1000  r2=0.5,0.95  iv=0.3,1  prior=C3,auto  diagnostic=false
+#   scenario=gaussian,mixture  n=1000  r2=0.5,0.95  iv=0.3,1  prior=C3,auto,hier  diagnostic=false
+#   (prior: C3 = fixed C3 Sigma scale; auto = setup_default_priors(raw; r = :auto); hier = C3 with
+#   the Sigma scale learned, sigma_scale = :hier, Phase 6a')
 #   reps=10  chains=4  M=3000  out=bench/coverage.csv  seed=20261126  shard=1/1
 #   n_g0=20 (G0 draws per saved draw in effects(); 5 cuts the effects time about 3x)
 #   draws=2000 (saved draws per chain: thin = max(1, M / draws))
@@ -39,7 +41,8 @@ base = replace(outfile, r"\.csv$" => "")
 nshard > 1 && (outfile = "$(base).shard$(shard).csv")
 
 const HEADER = "scenario,n,r2,iv,prior,diagnostic,rep,seed,estimand,mean,lo,hi,width,pop_truth,sample_truth," *
-               "cover_pop,cover_sample,bias_pop,bias_sample,rhat,ess_bulk,sep_share,k_mean,r1,r0,first_stage_F,secs"
+               "cover_pop,cover_sample,bias_pop,bias_sample,rhat,ess_bulk,sep_share,k_mean,r1,r0,first_stage_F,secs," *
+               "k5_mean,r1_post,r0_post,r1_data,r0_data"
 
 cells = [(sc, n, r2, iv, pr) for sc in scenarios for n in ns for r2 in r2s for iv in ivs for pr in priors]
 cellkey(c) = join(string.(c), "|") * "|$diagnostic"
@@ -76,15 +79,19 @@ function run_rep(c, rep)
         raw = CM.RawData(s.formulas.formula_y, s.formulas.formula_d, s.df)
         priors_ = pr == "auto" ? setup_default_priors(raw; r=:auto) : setup_default_priors(raw)
         R = priors_.prior_theta.prior_Sigma.R
-        effs, seps, ks = CM.Effects[], Float64[], Float64[]
+        effs, seps, ks, k5s, rp = CM.Effects[], Float64[], Float64[], Float64[], Vector{Float64}[]
+        rdata = auto_sigma_scale(raw).r
         for ch in 1:chains
-            p = CM.InputParams(M=M, thin=max(1, M ÷ ndraws), scale_data=(true, true), verbose=false, model="marginal")
+            p = CM.InputParams(M=M, thin=max(1, M ÷ ndraws), scale_data=(true, true), verbose=false, model="marginal",
+                               sigma_scale = pr == "hier" ? :hier : :fixed)
             crng = Xoshiro(seed + 1000ch)
             _, input, out = CM.dpm!(CM.dpm_init(raw, priors_, p; rng=crng)...; rng=crng)
             b = length(out.out_dp) ÷ 4
             push!(effs, CM.effects(out, input; rng=crng, burn=b, n_g0=n_g0))
             append!(seps, out.out_sep[(b + 1):end])
             append!(ks, [count(>(0), dp.njs) for dp in out.out_dp[(b + 1):end]])
+            append!(k5s, [count(>=(0.05n), dp.njs) for dp in out.out_dp[(b + 1):end]])
+            pr == "hier" && append!(rp, out.out_r[(b + 1):end])
         end
         e = CM.effects_summary(effs)
     end
@@ -100,7 +107,11 @@ function run_rep(c, rep)
                              @sprintf("%.6f", v.mean - ptruth), @sprintf("%.6f", v.mean - struth),
                              @sprintf("%.4f", v.rhat), @sprintf("%.1f", v.ess_bulk), @sprintf("%.4f", mean(seps)),
                              @sprintf("%.3f", mean(ks)), @sprintf("%.4f", R[2, 2]), @sprintf("%.4f", R[3, 3]),
-                             @sprintf("%.1f", s.info.first_stage_F), @sprintf("%.1f", t)], ","))
+                             @sprintf("%.1f", s.info.first_stage_F), @sprintf("%.1f", t),
+                             @sprintf("%.3f", mean(k5s)),
+                             isempty(rp) ? "NaN" : @sprintf("%.4f", mean(x[1] for x in rp)),
+                             isempty(rp) ? "NaN" : @sprintf("%.4f", mean(x[2] for x in rp)),
+                             @sprintf("%.4f", rdata[1]), @sprintf("%.4f", rdata[2])], ","))
     end
     lock(LOCK) do
         open(outfile, "a") do io
