@@ -3,7 +3,9 @@
 **Progress:**
 - **n = 2000:** done 2026-11-26 18:39 (8.6 h; 800/800 reps, no failures). Results are in
   `bench/coverage_tier1_n2000_summary.md`, and the coordinator was messaged.
-- **n = 500:** started 18:39, estimated at about 2 h.
+- **n = 500:** done 2026-11-26 20:43 (2.1 h; 800/800 reps, no failures).
+- **Tier 1 complete.** The write-up is `bench/phase6b.md` and the coordinator was messaged.
+  Nothing is running.
 
 A handoff note, so a fresh session can pick the run up.
 
